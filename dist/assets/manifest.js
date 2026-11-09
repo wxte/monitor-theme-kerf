@@ -2,7 +2,7 @@
 export const manifest = {
   "name": "Kerf",
   "short": "kerf",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "config": [
     {
       "type": "title",

@@ -458,10 +458,7 @@ function renderHome() {
         r.notice,
         r.title,
         c.hero_subtitle ? h("p", { class: "lede reveal reveal-2", text: c.hero_subtitle }) : null,
-        r.chip,
-        h("div", { class: "actions reveal reveal-3" },
-          h("a", { class: "btn btn-primary", href: "#nodes", text: "查看节点" }),
-          h("a", { class: "btn btn-ghost", href: "/admin/", ref: (el) => (r.heroAdmin = el), text: "后台" })))),
+        r.chip)),
     term,
     h("section", { class: "section", id: "nodes" },
       h("div", { class: "wrap" },
@@ -471,10 +468,7 @@ function renderHome() {
           stat("online", "在线节点"), stat("rx", "实时下行"), stat("tx", "实时上行"), stat("month", "本期流量")),
         r.list, r.empty)),
     h("section", { class: "closing wrap" },
-      r.closingTitle, r.closingLede,
-      h("div", { class: "actions", style: { display: "flex", gap: "12px", flexWrap: "wrap", justifyContent: "center" } },
-        h("a", { class: "btn btn-primary", href: "/admin/", ref: (el) => (r.closingAdmin = el), text: "进入后台" }),
-        h("a", { class: "btn btn-ghost", href: "#top", text: "回到顶部" }))))
+      r.closingTitle, r.closingLede))
 
   updateHome()
   if (location.hash) document.getElementById(location.hash.slice(1))?.scrollIntoView()
@@ -487,9 +481,6 @@ function updateHome() {
   const all = state.nodes ?? []
   const site = state.me?.site_name || "Monitor"
   setText(r.title, c.hero_title || site)
-  const adminText = state.me?.authed ? "进入后台" : "登录"
-  setText(r.heroAdmin, state.me?.authed ? "进入后台" : "后台")
-  setText(r.closingAdmin, adminText)
 
   // group tabs — rebuilt only when the set of groups changes
   const groups = groupsOf(all)
