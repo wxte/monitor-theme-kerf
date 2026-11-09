@@ -211,6 +211,26 @@ const cc = (node) => (typeof node.country === "string" && /^[A-Za-z]{2}$/.test(n
 
 // rewritten by tools/build.mjs to the hashed directories under assets/
 const FLAG_DIRS = { grey: "/flags", color: "/flags-color" }
+const OS_SPRITE = "/os.svg"
+
+// which icon in the sprite stands for an os string ("Debian GNU/Linux 12 (bookworm)")
+const OS_ICONS = [
+  [/ubuntu/, "ubuntu"], [/debian|raspbian/, "debian"], [/centos/, "centos"], [/alma/, "almalinux"],
+  [/rocky/, "rockylinux"], [/red ?hat|rhel/, "redhat"], [/fedora/, "fedora"], [/alpine/, "alpinelinux"],
+  [/manjaro/, "manjaro"], [/arch/, "archlinux"], [/suse/, "opensuse"], [/mint/, "linuxmint"], [/gentoo/, "gentoo"],
+  [/nixos/, "nixos"], [/kali/, "kalilinux"], [/openwrt|immortalwrt|istoreos/, "openwrt"], [/proxmox|\bpve\b/, "proxmox"],
+  [/deepin/, "deepin"], [/void/, "voidlinux"], [/android/, "android"], [/freebsd/, "freebsd"],
+  [/darwin|mac ?os|os x/, "apple"], [/windows/, "windows"], [/linux|gnu/, "linux"],
+]
+function osIcon(os) {
+  const t = String(os || "").toLowerCase()
+  if (!t) return null
+  // anything else a probe reports from is some Linux (Armbian, OpenCloudOS, ...)
+  const id = OS_ICONS.find(([re]) => re.test(t))?.[1] || "linux"
+  const svg = s("svg", { class: "os-i", viewBox: "0 0 24 24", "aria-hidden": true })
+  svg.append(s("use", { href: `${OS_SPRITE}#${id}` }))
+  return svg
+}
 
 /** A country as the operator chose to show it: its code, a colour flag or a grey one. */
 function flag(code) {
@@ -1092,9 +1112,10 @@ function makeRow(node) {
   ref.rx = h("span")
   ref.tx = h("span")
   ref.net = h("div", { class: "net" }, ref.rx, ref.tx)
+  ref.os = h("div", { class: "os" })      // shown where the row is wide enough
   const el = h("a", { class: "row", href: `/node/${encodeURIComponent(node.id)}`, "data-route": true },
     h("div", { class: "who" }, h("div", { class: "nm" }, ref.dot, ref.name, ref.cc), ref.sub),
-    ref.lat, ref.net, h("span", { class: "go", "aria-hidden": true, text: "→" }))
+    ref.os, ref.lat, ref.net, h("span", { class: "go", "aria-hidden": true, text: "→" }))
 
   const wants = () => state.config.show_latency && cur.online
   el.__nodeId = node.id
@@ -1122,7 +1143,7 @@ function makeRow(node) {
       place(ref.lat, lane.el, rows.indexOf(r))
       const sig = JSON.stringify([r.vals.length, r.vals[r.vals.length - 1], r.vals[0]])
       if (sig !== lane.sig) {
-        lane.sparkAt.replaceChildren(sparkline(r.vals, { w: 80, h: 12, motion: lane.sig ? "shift" : "draw" }))
+        lane.sparkAt.replaceChildren(sparkline(r.vals, { w: 160, h: 14, motion: lane.sig ? "shift" : "draw" }))
         lane.sig = sig
       }
       setText(lane.k, probeShort(r.name))
@@ -1134,12 +1155,21 @@ function makeRow(node) {
   }
   pingWatch.set(node.id, drawLat)
 
-  let subKey = ""
+  let subKey = "", osKey = null
   return {
     el,
     destroy() { seenObserver?.unobserve(el); onScreen.delete(node.id); pingWatch.delete(node.id) },
     update(n) {
       cur = n
+      const ok = `${n.os}|${n.arch}|${n.virt}`
+      if (ok !== osKey) {
+        osKey = ok
+        const name = osName(n.os).replace(/\s+LTS$/, "")
+        const more = [n.arch, n.virt && n.virt !== "none" ? n.virt : null].filter(Boolean).join(" · ")
+        ref.os.replaceChildren(...(name ? [osIcon(n.os),
+          h("div", { class: "os-t" }, h("span", { text: name }), more ? h("small", { text: more }) : null)] : []))
+        ref.os.title = [osName(n.os), n.kernel].filter(Boolean).join(" · ")
+      }
       const m = n.online ? n.metrics : null
       ref.dot.className = `dot ${n.online ? (m ? "on" : "wait") : "off"}`
       setText(ref.name, n.name)
@@ -1164,7 +1194,7 @@ function makeRow(node) {
         parts.forEach(([cls, t], i) => append(ref.sub, [i ? h("span", { class: `sep ${cls === "wide" || cls === "remark" ? cls : ""}`, text: " · " }) : null, h("span", { class: cls || null, text: t })]))
       }
 
-      ref.net.hidden = !m
+      ref.net.style.visibility = m ? "" : "hidden"    // keeps its column, so the arrow stays put
       if (m) {
         setText(ref.rx, `↓ ${rateShort(m.net_rx)}`)
         setText(ref.tx, `↑ ${rateShort(m.net_tx)}`)

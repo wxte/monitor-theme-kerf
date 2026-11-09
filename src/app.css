@@ -432,6 +432,21 @@ section[id], header[id] { scroll-margin-top: 80px; }
 .lane .v i { font-style: normal; font-size: 10px; color: var(--mute); }
 .lane .v.warn, .lane .v.warn i { color: var(--warn); }
 .lane .v.bad, .lane .v.bad i { color: var(--bad); }
+
+/* operating system: only where the row has room for it */
+.row .os { display: none; align-items: center; gap: 10px; min-width: 0; }
+.os-i { width: 20px; height: 20px; flex: none; fill: currentColor; color: var(--ink); opacity: .72; }
+.os-t { display: flex; flex-direction: column; min-width: 0; font-size: 13px; line-height: 18px; }
+.os-t span, .os-t small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.os-t span { color: var(--charcoal); }
+.os-t small { font-family: var(--font-mono); font-size: 11px; line-height: 16px; color: var(--mute); }
+@media (min-width: 1024px) {
+  .row { grid-template-columns: minmax(0, 1fr) 150px 340px 104px 16px; gap: 28px; }
+  .row .os { display: flex; }
+  .lanes { gap: 4px; }
+  .lane { grid-template-columns: 32px minmax(0, 1fr) 76px; gap: 8px; height: 14px; }
+  .lane .sp, .lane .spark-w { height: 14px; }
+}
 @media (max-width: 639px) {
   .row { grid-template-columns: minmax(0, 1fr) 132px 60px; gap: 10px; padding: 12px 2px; }
   .lane { grid-template-columns: 20px minmax(0, 1fr) 54px; gap: 4px; }
@@ -546,10 +561,9 @@ section[id], header[id] { scroll-margin-top: 80px; }
   .lede { font-size: 15px; line-height: 22px; }
   .chip { font-size: 13px; padding: 8px 16px; }
 
-  /* the terminal keeps its top three on a phone */
+  /* the terminal: tighter on a phone, as many rows as the setting asks */
   .term { font-size: 12.5px; padding: 12px 14px 14px; }
   .term-bar { margin-bottom: 10px; }
-  .term-rows > :nth-child(n+19) { display: none; }
   .term .comment { margin-top: 10px; }
 
   .section { padding: 32px 0; }

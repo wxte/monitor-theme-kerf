@@ -2,7 +2,7 @@
 //
 // The hub caches everything under assets/ for a year without asking again,
 // and revalidates every other path on each visit. So every file the page
-// loads -- script, stylesheet, fonts, flags -- goes under assets/ with its
+// loads -- script, stylesheet, fonts, flags, icons -- goes under assets/ with its
 // content hash in its name, and a new version still reaches visitors on their
 // next load. Only the shell (index.html), the site icons and the licenses live
 // outside it.
@@ -59,6 +59,12 @@ export async function build({ quiet = false } = {}) {
     if (key === "grey") cpSync(at(`static/${dir}/LICENSE-flag-icons.txt`), at("dist/licenses/LICENSE-flag-icons.txt"))
   }
 
+  // operating-system icon sprite
+  const osData = readFileSync(at("static/os.svg"))
+  const osSprite = `/assets/os.${hash(osData)}.svg`
+  writeFileSync(at(`dist${osSprite}`), osData)
+  cpSync(at("static/LICENSE-simple-icons.txt"), at("dist/licenses/LICENSE-simple-icons.txt"))
+
   // stylesheet
   let css = readFileSync(at("src/app.css"), "utf8")
   css = css.replace(/url\("\/fonts\/([^"?]+)"\)/g, (m, f) => (fonts[f] ? `url("${fonts[f]}")` : m))
@@ -72,9 +78,12 @@ export async function build({ quiet = false } = {}) {
   const flagLine = /^const FLAG_DIRS = .*$/m
   if (!importLine.test(js)) throw new Error("src/app.js: manifest import not found")
   if (!flagLine.test(js)) throw new Error("src/app.js: FLAG_DIRS not found")
+  const osLine = /^const OS_SPRITE = .*$/m
+  if (!osLine.test(js)) throw new Error("src/app.js: OS_SPRITE not found")
   js = js
     .replace(importLine, `const manifest = ${JSON.stringify({ name, short, version, config })}`)
     .replace(flagLine, `const FLAG_DIRS = ${JSON.stringify(flagDirs)}`)
+    .replace(osLine, `const OS_SPRITE = ${JSON.stringify(osSprite)}`)
   if (esbuild) js = esbuild.transformSync(js, { loader: "js", format: "esm", minify: true, target: "es2020", legalComments: "none" }).code
   const jsName = `app.${hash(js)}.js`
   writeFileSync(at(`dist/assets/${jsName}`), js)

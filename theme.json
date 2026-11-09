@@ -2,7 +2,7 @@
   "name": "Kerf",
   "short": "kerf",
   "description": "黑白极简，细线断笔标题字，终端式实时报告",
-  "version": "1.7.1",
+  "version": "1.8.0",
   "author": "wxte",
   "url": "https://github.com/wxte/monitor-theme-kerf",
   "config": [
