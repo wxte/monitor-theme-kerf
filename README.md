@@ -40,9 +40,10 @@ hub 前面如果有按路径放行的反代或 WAF，要放行 `/node/` 前缀�
 | 公告 | 空 | 显示在大标题上方，纯文本，可换行 |
 | 显示终端报告 | 开 | 首页按实时流量排序的终端式报告 |
 | 终端报告行数 | 5 | 1–20 |
-| 节点布局 | 卡片 | 卡片 / 列表。列表每行左边是节点名和 CPU、内存、磁盘，中间是最近 2 分钟的网速小折线，右边上下两行是下行、上行速率 |
+| 节点布局 | 卡片 | 卡片 / 列表。列表每行左边是节点名和 CPU、内存、磁盘，中间是前三条延迟线路的当前延迟，右边上下两行是下行、上行速率 |
 | 显示价格 | 开 | 有价格的节点在卡片上显示价格和付款周期 |
-| 显示延迟 | 开 | 卡片上显示各延迟线路最近 1 小时的折线、当前延迟和丢包率。只请求屏幕上看得到的在线节点，每张卡每分钟一次，最多同时 3 个请求 |
+| 显示延迟 | 开 | 卡片上显示各延迟线路最近 1 小时的折线、当前延迟和丢包率；列表布局显示前三条线路的当前延迟。只请求屏幕上看得到的在线节点，每张卡每分钟一次，最多同时 3 个请求 |
+| 国家显示 | 文字 | 文字代码（JP）/ 彩色国旗 / 灰色国旗 |
 | 显示规格清单 | 关 | 卡片底部的 ✓ 清单：CPU 型号、内存、磁盘、网速、系统、运行时间、到期日（节点详情里都有） |
 | 到期提醒 | 开 | 7 天内到期或已过期时在卡片价格下方提示，到期日期在节点详情里 |
 | 页脚说明 | 空 | 页脚只有一行：这段说明（如果填了）加「© 年份 站点名」 |
@@ -55,7 +56,7 @@ hub 前面如果有按路径放行的反代或 WAF，要放行 `/node/` 前缀�
 | Space Grotesk | 正文、数字 | [floriankarsten/space-grotesk](https://github.com/floriankarsten/space-grotesk) |
 | JetBrains Mono | 终端、等宽数字 | [JetBrains/JetBrainsMono](https://github.com/JetBrains/JetBrainsMono) |
 
-国旗来自 [flag-icons](https://github.com/lipis/flag-icons)（MIT），转成了 48×36 的灰度 PNG，放在 `static/flags/`，许可证随附。
+国旗来自 [flag-icons](https://github.com/lipis/flag-icons)（MIT），转成了 48×36 的小 PNG：灰度的在 `static/flags/`，彩色的在 `static/flags-color/`，许可证随附。
 
 三套字体都是 SIL Open Font License 1.1，许可证随字体放在 `static/fonts/`。Kerf 是 Lexend 的修改版，按 OFL 要求改了名字。中文回落到系统字体：标题用细体（苹方 Light、微软雅黑 Light 等），和极细的英文笔画相称。
 

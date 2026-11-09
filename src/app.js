@@ -141,20 +141,30 @@ const clock = (d = new Date()) =>
 
 const cc = (node) => (typeof node.country === "string" && /^[A-Za-z]{2}$/.test(node.country) ? node.country.toUpperCase() : "")
 
-/** A small grey flag for a country code; the code itself when there is no flag for it. */
+/** A country as the operator chose to show it: its code, a colour flag or a grey one. */
 function flag(code) {
   if (!code) return null
-  const img = h("img", { class: "flag", src: `/flags/${code.toLowerCase()}.png`, alt: code, title: code,
-    width: 16, height: 12, decoding: "async" })
-  img.addEventListener("error", () => img.replaceWith(h("span", { class: "flag-txt", text: code })), { once: true })
+  const style = state.config.country_style
+  const text = () => h("span", { class: "flag-txt", text: code })
+  if (style !== "color" && style !== "grey") return text()
+  const img = h("img", { class: `flag ${style}`, src: `/${style === "color" ? "flags-color" : "flags"}/${code.toLowerCase()}.png`,
+    alt: code, title: code, width: 16, height: 12, decoding: "async" })
+  img.addEventListener("error", () => img.replaceWith(text()), { once: true })
   return img
 }
-/** Swap the flag in `el` only when the country changes, so pushes do not reload images. */
+/** Swap the country mark in `el` only when it changes, so pushes do not reload images. */
 function setFlag(el, code) {
-  if (el.dataset.cc === code) return
-  el.dataset.cc = code
+  const key = `${state.config.country_style}:${code}`
+  if (el.dataset.cc === key) return
+  el.dataset.cc = key
   clear(el)
   if (code) el.append(flag(code))
+}
+/** Several countries in a row: separated by dots as text, spaced as flags. */
+function countryList(codes) {
+  const asText = state.config.country_style !== "color" && state.config.country_style !== "grey"
+  return h("span", { class: asText ? "flags as-text" : "flags" },
+    codes.map((c, i) => [asText && i ? h("span", { class: "sep", text: "·" }) : null, flag(c)]))
 }
 
 /* ════════════════════════ API ════════════════════════ */
@@ -558,7 +568,7 @@ function updateHome() {
   // hero chip: "12 在线 · 2 离线 — [flags]"; rebuilt only when it changes
   const countries = [...new Set(nodes.map(cc).filter(Boolean))]
   const room = innerWidth < 640 ? 5 : 8
-  const chipKey = state.nodes ? JSON.stringify([sum.online, sum.offline, countries.slice(0, room), countries.length]) : "wait"
+  const chipKey = state.nodes ? JSON.stringify([sum.online, sum.offline, countries.slice(0, room), countries.length, state.config.country_style]) : "wait"
   if (chipKey !== r.chipKey) {
     r.chipKey = chipKey
     clear(r.chip)
@@ -567,8 +577,8 @@ function updateHome() {
         h("b", { text: `${sum.online} 在线` }),
         sum.offline ? [h("span", { class: "sep", text: "·" }), h("b", { text: `${sum.offline} 离线` })] : null,
         countries.length ? [h("span", { class: "sep", text: "—" }),
-          h("span", { class: "flags" }, countries.slice(0, room).map(flag),
-            countries.length > room ? h("span", { class: "more", text: `+${countries.length - room}` }) : null)] : null])
+          countryList(countries.slice(0, room)),
+          countries.length > room ? h("span", { class: "more", text: `+${countries.length - room}` }) : null] : null])
     } else {
       r.chip.append(h("span", { text: "正在连接…" }))
     }
@@ -874,27 +884,60 @@ function makeCard(node) {
   }
 }
 
-/* ── one node as a list row: name and load on the left, ↓ ↑ stacked on the
-   right, the same shape for every node ── */
+/* ── one node as a list row: name and load on the left, the latest latency of
+   up to three probes in the middle, ↓ ↑ stacked on the right ── */
+
+/** A probe's name cut to fit a column: the carrier when it names one, else its start. */
+function probeShort(name) {
+  const carrier = /电信|联通|移动|广电|教育网|CT|CU|CM/i.exec(name)
+  if (carrier) return carrier[0].toUpperCase()
+  return [...name].slice(0, /[\u4e00-\u9fff]/.test(name) ? 2 : 4).join("")
+}
 
 function makeRow(node) {
   const ref = {}
+  let cur = node
   ref.dot = h("i", { class: "dot" })
   ref.name = h("span")
   ref.cc = h("span", { class: "cc" })
   ref.sub = h("div", { class: "sub" })
+  ref.lat = h("div", { class: "lat-mini" })
   ref.rx = h("span")
   ref.tx = h("span")
   ref.net = h("div", { class: "net" }, ref.rx, ref.tx)
-  ref.spark = h("div", { class: "spark-box" })
   const el = h("a", { class: "row", href: `/node/${encodeURIComponent(node.id)}`, "data-route": true },
     h("div", { class: "who" }, h("div", { class: "nm" }, ref.dot, ref.name, ref.cc), ref.sub),
-    ref.spark, ref.net, h("span", { class: "go", "aria-hidden": true, text: "→" }))
+    ref.lat, ref.net, h("span", { class: "go", "aria-hidden": true, text: "→" }))
+
+  const wants = () => state.config.show_latency && cur.online
   el.__nodeId = node.id
+  el.__wantsPing = wants
+  seenObserver?.observe(el)
+  if (!seenObserver) onScreen.add(node.id)
+  let latKey = ""
+  const drawLat = () => {
+    const rows = wants() ? pingCache.get(cur.id)?.rows?.slice(0, 3) : null
+    const key = rows ? JSON.stringify(rows.map((r) => [r.name, r.last, r.loss])) : "none"
+    if (key === latKey) return
+    latKey = key
+    clear(ref.lat)
+    if (!rows || !rows.length) return
+    ref.lat.style.setProperty("--cols", rows.length)
+    for (const r of rows) ref.lat.append(h("span", { class: "k", title: r.name, text: probeShort(r.name) }))
+    for (const r of rows) {
+      const cls = r.last == null || r.loss >= 5 ? "v bad" : r.loss >= 1 ? "v warn" : "v"
+      ref.lat.append(h("span", { class: cls, title: `${r.name} ${r.last == null ? "超时" : Math.round(r.last) + " ms"}${r.loss ? ` · 丢包 ${r.loss < 1 ? "<1" : Math.round(r.loss)}%` : ""}`,
+        text: r.last == null ? "超时" : String(Math.round(r.last)) }))
+    }
+  }
+  pingWatch.set(node.id, drawLat)
+
   let subKey = ""
   return {
     el,
+    destroy() { seenObserver?.unobserve(el); onScreen.delete(node.id); pingWatch.delete(node.id) },
     update(n) {
+      cur = n
       const m = n.online ? n.metrics : null
       ref.dot.className = `dot ${n.online ? (m ? "on" : "wait") : "off"}`
       setText(ref.name, n.name)
@@ -919,13 +962,13 @@ function makeRow(node) {
         parts.forEach(([cls, t], i) => append(ref.sub, [i ? h("span", { class: `sep ${cls === "wide" || cls === "remark" ? cls : ""}`, text: " · " }) : null, h("span", { class: cls || null, text: t })]))
       }
 
-      clear(ref.spark)
-      ref.spark.append(rateSpark(n.id))
       ref.net.hidden = !m
       if (m) {
         setText(ref.rx, `↓ ${rateShort(m.net_rx)}`)
         setText(ref.tx, `↑ ${rateShort(m.net_tx)}`)
       }
+      if (wants() && onScreen.has(n.id)) wantPing(n.id)
+      drawLat()
     },
   }
 }
@@ -1051,7 +1094,8 @@ function updateNode() {
   append(r.chip, [
     h("b", { text: status, style: { color: n.online ? (m ? "var(--ok)" : "var(--warn)") : "var(--bad)" } }),
     bits.length ? [h("span", { class: "sep", text: "—" }), bits.map((b, i) => [i ? h("span", { class: "sep", text: "·" }) : null,
-      i === 0 && code ? h("span", { class: "flags" }, flag(code), h("span", { text: code })) : h("span", { text: b })])] : null])
+      i === 0 && code ? (state.config.country_style === "color" || state.config.country_style === "grey"
+        ? h("span", { class: "flags" }, flag(code), h("span", { text: code })) : h("span", { text: code })) : h("span", { text: b })])] : null])
   }
 
   const val = (k, main, small) => { clear(r.stats[k]); r.stats[k].append(main, small ? h("small", { text: small }) : null) }
@@ -1369,54 +1413,7 @@ function route() {
   }
 }
 
-// The last two minutes of each node's ↓/↑ rate, one sample per push. A gap in
-// the pushes (page hidden, stream down) starts the lines over rather than
-// joining samples minutes apart as neighbours.
-const LIVE_KEEP = 60
-const liveRates = new Map()
-let lastSample = 0
-function sampleRates(nodes) {
-  const now = Date.now()
-  if (now - lastSample > 6500) liveRates.clear()
-  lastSample = now
-  const seen = new Set()
-  for (const n of nodes) {
-    seen.add(n.id)
-    const m = n.online ? n.metrics : null
-    const series = liveRates.get(n.id) ?? []
-    series.push(m ? [m.net_rx, m.net_tx] : null)
-    if (series.length > LIVE_KEEP) series.shift()
-    liveRates.set(n.id, series)
-  }
-  for (const id of liveRates.keys()) if (!seen.has(id)) liveRates.delete(id)
-}
-
-function rateSpark(id) {
-  const W = 96, H = 24
-  const svg = s("svg", { class: "rspark", viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: "none", "aria-hidden": true })
-  const series = liveRates.get(id) ?? []
-  if (series.filter(Boolean).length < 2) return svg
-  // a floor of 4 KB/s keeps an idle node's noise from filling the box
-  let top = 4096
-  for (const p of series) if (p) top = Math.max(top, p[0], p[1])
-  // until two minutes have been collected the samples spread over the full width
-  const step = W / (Math.max(series.length, 2) - 1)
-  const x0 = 0
-  for (const k of [1, 0]) {
-    let d = "", pen = false
-    series.forEach((p, i) => {
-      if (!p) { pen = false; return }
-      const x = x0 + i * step, y = H - 1 - (p[k] / top) * (H - 3)
-      d += `${pen ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}`
-      pen = true
-    })
-    if (d) svg.append(s("path", { d, class: k ? "tx" : "rx" }))
-  }
-  return svg
-}
-
 function onNodes(nodes) {
-  sampleRates(nodes)
   state.nodes = nodes
   state.updatedAt = new Date()
   state.error = null
