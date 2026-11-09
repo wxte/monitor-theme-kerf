@@ -55,7 +55,7 @@ function bytes(n, digits) {
 /** A capacity: whole numbers lose their decimals, 1.00 GB → 1 GB. */
 const size = (n) => bytes(n).replace(/\.0+ /, " ")
 const rate = (n) => `${bytes(n)}/s`
-const rateShort = (n) => bytes(n, n >= 1024 * 100 ? 0 : 1).replace(" ", "").replace(/([KMGTP])B$/, "$1") + "/s"
+const rateShort = (n) => (!(n >= 1024) ? `${Math.round(n || 0)}B` : bytes(n, n >= 1024 * 100 ? 0 : 1).replace(" ", "").replace(/([KMGTP])B$/, "$1")) + "/s"
 const pct = (v, d = 1) => (typeof v === "number" && Number.isFinite(v) ? `${v.toFixed(d)}%` : "—")
 const ratio = (a, b) => (b > 0 ? (a / b) * 100 : null)
 
@@ -475,7 +475,7 @@ function renderHome() {
       h("div", { class: "wrap" },
         h("div", { class: "section-head" }, h("h2", { class: "h2", text: "节点" }), r.sectionLede),
         r.tabs,
-        h("div", { class: "stats", style: { marginBottom: "28px" } },
+        h("div", { class: "stats home", style: { marginBottom: "28px" } },
           stat("online", "在线节点"), stat("rx", "实时下行"), stat("tx", "实时上行"), stat("month", "本期流量")),
         r.list, r.empty)),
     h("section", { class: "closing wrap" },
@@ -855,55 +855,55 @@ function makeCard(node) {
   }
 }
 
-/* ── one node as a list row ── */
+/* ── one node as a list row: name and load on the left, ↓ ↑ stacked on the
+   right, the same shape for every node ── */
 
 function makeRow(node) {
   const ref = {}
-  let cur = node
   ref.dot = h("i", { class: "dot" })
   ref.name = h("span")
   ref.cc = h("em")
   ref.sub = h("div", { class: "sub" })
-  ref.met = h("div", { class: "met" })
+  ref.rx = h("span")
+  ref.tx = h("span")
+  ref.net = h("div", { class: "net" }, ref.rx, ref.tx)
   const el = h("a", { class: "row", href: `/node/${encodeURIComponent(node.id)}`, "data-route": true },
-    h("div", { style: { minWidth: 0 } }, h("div", { class: "nm" }, ref.dot, ref.name, ref.cc), ref.sub),
-    ref.met, h("span", { class: "go", "aria-hidden": true, text: "→" }))
-  const wants = () => state.config.show_latency && cur.online
+    h("div", { class: "who" }, h("div", { class: "nm" }, ref.dot, ref.name, ref.cc), ref.sub),
+    ref.net, h("span", { class: "go", "aria-hidden": true, text: "→" }))
   el.__nodeId = node.id
-  el.__wantsPing = wants
-  seenObserver?.observe(el)
-  if (!seenObserver) onScreen.add(node.id)
-  const draw = () => {
-    const m = cur.online ? cur.metrics : null
-    clear(ref.met)
-    if (m) {
-      const p = wants() ? pingCache.get(cur.id)?.rows?.[0] : null
-      append(ref.met, [
-        p ? h("span", { title: p.name }, "延迟 ", h("b", { text: p.last == null ? "超时" : `${Math.round(p.last)}ms` }),
-          p.loss >= 1 ? h("span", { style: { color: p.loss >= 5 ? "var(--bad)" : "var(--warn)" }, text: ` 丢${Math.round(p.loss)}%` }) : null) : null,
-        h("span", { class: p ? "wide" : null }, "cpu ", h("b", { text: pct(m.cpu, 0) })),
-        h("span", { class: "wide" }, "mem ", h("b", { text: pct(ratio(m.mem_used, m.mem_total), 0) })),
-        h("span", null, "↓ ", h("b", { text: rateShort(m.net_rx) })),
-        h("span", { class: "wide" }, "↑ ", h("b", { text: rateShort(m.net_tx) }))])
-    } else {
-      const ago = sinceSeen(cur)
-      ref.met.append(h("span", { style: { color: cur.online ? "var(--warn)" : "var(--bad)" },
-        text: cur.online ? "等待上报" : ago == null ? "从未上报" : `离线 ${uptime(ago)}` }))
-    }
-  }
-  pingWatch.set(node.id, draw)
+  let subKey = ""
   return {
     el,
-    destroy() { seenObserver?.unobserve(el); onScreen.delete(node.id); pingWatch.delete(node.id) },
     update(n) {
-      cur = n
       const m = n.online ? n.metrics : null
       ref.dot.className = `dot ${n.online ? (m ? "on" : "wait") : "off"}`
       setText(ref.name, n.name)
       setText(ref.cc, cc(n))
-      setText(ref.sub, n.public_remark || [osName(n.os), n.arch].filter(Boolean).join(" · "))
-      if (wants() && onScreen.has(n.id)) wantPing(n.id)
-      draw()
+
+      // second line: load when reporting, otherwise why it is not
+      const parts = []
+      if (m) {
+        parts.push(["", `CPU ${pct(m.cpu, 0)}`], ["", `内存 ${pct(ratio(m.mem_used, m.mem_total), 0)}`],
+          ["wide", `磁盘 ${pct(ratio(m.disk_used, m.disk_total), 0)}`])
+      } else {
+        const ago = sinceSeen(n)
+        parts.push([n.online ? "warn" : "bad", n.online ? "已连接，等待首次上报" : ago == null ? "从未上报" : `离线 ${uptime(ago)}`])
+      }
+      const d = state.config.show_expiry ? expiryDays(n) : null
+      if (d != null && d <= 7) parts.push([d < 0 ? "bad" : "warn", expiryText(d)])
+      if (n.public_remark) parts.push(["remark", n.public_remark])
+      const key = JSON.stringify(parts)
+      if (key !== subKey) {
+        subKey = key
+        clear(ref.sub)
+        parts.forEach(([cls, t], i) => append(ref.sub, [i ? h("span", { class: `sep ${cls === "wide" || cls === "remark" ? cls : ""}`, text: " · " }) : null, h("span", { class: cls || null, text: t })]))
+      }
+
+      ref.net.hidden = !m
+      if (m) {
+        setText(ref.rx, `↓ ${rateShort(m.net_rx)}`)
+        setText(ref.tx, `↑ ${rateShort(m.net_tx)}`)
+      }
     },
   }
 }

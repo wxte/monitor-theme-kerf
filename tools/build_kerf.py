@@ -29,7 +29,7 @@ SRC, OUT = sys.argv[1], sys.argv[2]
 WEIGHT = float(sys.argv[3]) if len(sys.argv) > 3 else 200
 S = 2000            # render size in px per em
 GAP = 0.85          # gap width, in stroke widths
-CHARS = (
+CHARS_ALL = (
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
     " .,:;!?'\"-–—_/\\|()[]{}<>@#$%&*+=^~`·•→←↑↓°×…¥€£©®™"
 )
@@ -37,6 +37,8 @@ CHARS = (
 # glyphs left whole: a cut at their junction reads as damage, not as a pen lift
 # (the 3's two arcs meet in a point, so the cut lands across a curve)
 NO_CUT = set("3")
+
+CHARS = os.environ.get("KERF_ONLY") or CHARS_ALL
 
 os.makedirs(OUT, exist_ok=True)
 static_path = os.path.join(OUT, "_static.ttf")
@@ -134,8 +136,10 @@ def stencil(mask):
     deg = ndimage.convolve(sk.astype(int), np.ones((3, 3), int), mode="constant") - 1
     deg[~sk] = 0
     jpix = np.argwhere((deg >= 3) & sk)
+    out = mask.copy()
     if len(jpix) == 0:
-        return mask
+        cut_corners(mask, out, sk, stroke, [])
+        return clean(out, stroke)
 
     # cluster junction pixels that belong to the same junction
     lab_img = np.zeros(mask.shape, bool)
@@ -144,7 +148,6 @@ def stencil(mask):
     lab_img = ndimage.binary_dilation(lab_img, iterations=max(2, int(stroke * 0.6)))
     labels, n = ndimage.label(lab_img)
 
-    out = mask.copy()
     look = int(stroke * 2.2)
 
     for k in range(1, n + 1):
@@ -230,6 +233,11 @@ def stencil(mask):
             cv2.fillPoly(er, [np.round(np.array(pts)).astype(np.int32)], 1)
             out &= ~(er.astype(bool) & ~tmask)
 
+    cut_corners(mask, out, sk, stroke, jpix)
+    return clean(out, stroke)
+
+
+def clean(out, stroke):
     # drop crumbs the cuts may leave behind
     lab, n = ndimage.label(out)
     if n:
@@ -238,6 +246,120 @@ def stencil(mask):
             if sz < stroke * stroke * 1.2:
                 out[lab == i] = False
     return out
+
+
+def cut_corners(mask, out, sk, stroke, jpix):
+    """
+    Cut where a bowl meets the end of a stem: a sharp corner of the skeleton
+    whose inside is a counter (a hole), with one arm a straight upright stem.
+    The bowl arm is separated from the stem; corners of straight strokes (L, E,
+    V, M) have no counter inside or no upright stem, and stay whole.
+    """
+    pts = np.argwhere(sk).astype(float)
+    if len(pts) < 10:
+        return
+    k = stroke * 1.2
+    # stay clear of junctions, which have been handled
+    far_from_j = np.ones(len(pts), bool)
+    if len(jpix):
+        jp = np.asarray(jpix, float)
+        for i, p in enumerate(pts):
+            if np.min(np.hypot(*(jp - p).T)) < stroke * 2.0:
+                far_from_j[i] = False
+
+    bg = ~mask
+    lab, n = ndimage.label(bg)
+    border = set(np.unique(np.concatenate([lab[0], lab[-1], lab[:, 0], lab[:, -1]])))
+    holes = np.isin(lab, [i for i in range(1, n + 1) if i not in border])
+
+    def arms(p, r, sector=None):
+        d = np.hypot(*(pts - p).T)
+        ring = pts[(d > r - 2) & (d < r + 2)]
+        if len(ring) < 2:
+            return []
+        vec = ring - p
+        vec /= np.linalg.norm(vec, axis=1)[:, None]
+        if sector is not None:
+            keep = vec @ sector > 0.6
+            ring, vec = ring[keep], vec[keep]
+            return [ring.mean(axis=0)] if len(ring) else []
+        # two clusters by direction
+        a = vec[0]
+        g1 = vec @ a > 0.3
+        if g1.all() or (~g1).all():
+            return []
+        return [ring[g1].mean(axis=0), ring[~g1].mean(axis=0)]
+
+    cand = []
+    for i, p in enumerate(pts):
+        if not far_from_j[i]:
+            continue
+        a = arms(p, k)
+        if len(a) != 2:
+            continue
+        u, v = a[0] - p, a[1] - p
+        cosang = u @ v / (np.linalg.norm(u) * np.linalg.norm(v))
+        ang = np.degrees(np.arccos(np.clip(cosang, -1, 1)))
+        if ang < 125:
+            cand.append((ang, p, a))
+    if not cand:
+        return
+    # one corner per cluster: the sharpest pixel
+    cand.sort(key=lambda c: c[0])
+    taken = []
+    for ang, p, a in cand:
+        if any(np.hypot(*(p - q)) < stroke * 2.5 for q in taken):
+            continue
+        taken.append(p)
+        u = (a[0] - p) / np.linalg.norm(a[0] - p)
+        v = (a[1] - p) / np.linalg.norm(a[1] - p)
+        # inside of the corner must be a counter
+        inside = p + (u + v) / (np.linalg.norm(u + v) or 1) * stroke * 1.2
+        iy, ix = int(round(inside[0])), int(round(inside[1]))
+        if not (0 <= iy < mask.shape[0] and 0 <= ix < mask.shape[1]) or not holes[iy, ix]:
+            continue
+        # which arm is a straight upright stem?
+        arm_info = []
+        for near, dvec in ((a[0], u), (a[1], v)):
+            far = arms(p, k * 2.4, sector=dvec)
+            if not far:
+                arm_info.append(None)
+                continue
+            far = far[0]
+            d2 = (far - near) / (np.linalg.norm(far - near) or 1)
+            straight = d2 @ dvec > np.cos(np.radians(10))
+            upright = abs(dvec[0]) > 0.9
+            arm_info.append({"near": near, "far": far, "dir": dvec, "stem": straight and upright})
+        if None in arm_info:
+            continue
+        stems = [i for i, x in enumerate(arm_info) if x["stem"]]
+        if len(stems) != 1:
+            continue
+        S, B = arm_info[stems[0]], arm_info[1 - stems[0]]
+        # true corner: where the stem's line meets the bowl arm's line
+        sd = (S["near"] - S["far"]) / np.linalg.norm(S["near"] - S["far"])
+        bd = B["dir"]
+        A = np.array([[sd[0], -bd[0]], [sd[1], -bd[1]]])
+        try:
+            t = np.linalg.solve(A, B["near"] - S["far"])
+            corner = S["far"] + sd * t[0]
+        except np.linalg.LinAlgError:
+            corner = p
+        # protect the stem, its end cap included
+        lines = np.zeros(mask.shape, np.uint8)
+        e2 = corner + sd * stroke * 0.6
+        cv2.line(lines, (int(S["far"][1]), int(S["far"][0])), (int(e2[1]), int(e2[0])), 1)
+        tmask = (ndimage.distance_transform_edt(lines == 0) <= stroke * 0.5 + 1.0) & mask
+        r2 = stroke * 0.5 + stroke * GAP
+        half = stroke * 1.3
+        perp = np.array([-bd[1], bd[0]])
+        poly = []
+        for a_, s_ in ((0, -half), (0, half), (r2, half), (r2, -half)):
+            q = corner + bd * a_ + perp * s_
+            poly.append([q[1], q[0]])
+        er = np.zeros(mask.shape, np.uint8)
+        cv2.fillPoly(er, [np.round(np.array(poly)).astype(np.int32)], 1)
+        out &= ~(er.astype(bool) & ~tmask)
 
 
 def contours_to_glyph(mask, ox):
