@@ -711,29 +711,72 @@ const seenObserver = typeof IntersectionObserver === "function"
   }, { rootMargin: "200px 0px" })
   : null
 
-function sparkline(vals) {
-  const W = 64, H = 18
-  const nums = vals.filter((v) => v != null)
-  const svg = s("svg", { class: "spark", viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: "none", "aria-hidden": true })
+/**
+ * A latency trend drawn small: averaged into at most 28 points, lightly
+ * smoothed, a soft fade beneath, a dot on the latest reading. Each line is
+ * scaled to its own range, never narrower than 10 ms, so a steady link stays
+ * flat instead of being magnified into noise. Timeouts mark the baseline red.
+ */
+let sparkSeq = 0
+function sparkline(vals, { w = 64, h = 18 } = {}) {
+  const svg = s("svg", { class: "spark", viewBox: `0 0 ${w} ${h}`, preserveAspectRatio: "none", "aria-hidden": true })
+  // bucket
+  const N = Math.min(28, vals.length)
+  if (N < 2) return svg
+  const bucket = []
+  for (let i = 0; i < N; i++) {
+    const part = vals.slice(Math.floor((i * vals.length) / N), Math.floor(((i + 1) * vals.length) / N))
+    const nums = part.filter((v) => v != null)
+    bucket.push(nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : null)
+  }
+  // light smoothing, gaps kept
+  const sm = bucket.map((v, i) => {
+    if (v == null) return null
+    const near = [bucket[i - 1], v, v, bucket[i + 1]].filter((x) => x != null)
+    return near.reduce((a, b) => a + b, 0) / near.length
+  })
+  const nums = sm.filter((v) => v != null)
   if (nums.length < 2) return svg
   let lo = Math.min(...nums), hi = Math.max(...nums)
-  if (hi - lo < 4) { const mid = (hi + lo) / 2; lo = mid - 2; hi = mid + 2 }
-  const n = vals.length
-  let d = ""
-  let pen = false
-  vals.forEach((v, i) => {
-    if (v == null) { pen = false; return }
-    const x = n === 1 ? W / 2 : (i / (n - 1)) * W
-    const y = H - 1.5 - ((v - lo) / (hi - lo)) * (H - 3)
-    d += `${pen ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}`
-    pen = true
+  if (hi - lo < 10) { const mid = (hi + lo) / 2; lo = mid - 5; hi = mid + 5 }
+  const pad = 2
+  const X = (i) => (i / (N - 1)) * w
+  const Y = (v) => h - pad - ((v - lo) / (hi - lo)) * (h - pad * 2)
+  const clampY = (y) => Math.max(0.5, Math.min(h - 0.5, y))
+
+  // runs of points between gaps, each drawn as a Catmull-Rom curve
+  const runs = []
+  let run = []
+  sm.forEach((v, i) => {
+    if (v == null) { if (run.length) runs.push(run); run = []; return }
+    run.push([X(i), Y(v)])
   })
-  svg.append(s("path", { d }))
-  vals.forEach((v, i) => {
-    if (v != null) return
-    const x = n === 1 ? W / 2 : (i / (n - 1)) * W
-    svg.append(s("line", { class: "miss", x1: x, x2: x, y1: H - 4, y2: H }))
+  if (run.length) runs.push(run)
+  const curve = (p) => {
+    let d = `M${p[0][0].toFixed(2)},${p[0][1].toFixed(2)}`
+    for (let i = 0; i < p.length - 1; i++) {
+      const p0 = p[i - 1] || p[i], p1 = p[i], p2 = p[i + 1], p3 = p[i + 2] || p2
+      const c1 = [p1[0] + (p2[0] - p0[0]) / 6, clampY(p1[1] + (p2[1] - p0[1]) / 6)]
+      const c2 = [p2[0] - (p3[0] - p1[0]) / 6, clampY(p2[1] - (p3[1] - p1[1]) / 6)]
+      d += `C${c1[0].toFixed(2)},${c1[1].toFixed(2)} ${c2[0].toFixed(2)},${c2[1].toFixed(2)} ${p2[0].toFixed(2)},${p2[1].toFixed(2)}`
+    }
+    return d
+  }
+  const id = `kf${++sparkSeq}`
+  svg.append(s("defs", null, s("linearGradient", { id, x1: 0, y1: 0, x2: 0, y2: 1 },
+    s("stop", { offset: "0", "stop-color": "currentColor", "stop-opacity": ".14" }),
+    s("stop", { offset: "1", "stop-color": "currentColor", "stop-opacity": "0" }))))
+  for (const p of runs) {
+    if (p.length < 2) continue
+    const line = curve(p)
+    svg.append(s("path", { class: "fill", d: `${line}L${p[p.length - 1][0].toFixed(2)},${h}L${p[0][0].toFixed(2)},${h}Z`, fill: `url(#${id})` }))
+    svg.append(s("path", { class: "line", d: line }))
+  }
+  bucket.forEach((v, i) => {
+    if (v == null) svg.append(s("path", { class: "miss", d: `M${X(i).toFixed(2)},${h - 3}V${h}` }))
   })
+  const last = sm[N - 1]
+  if (last != null) svg.append(s("path", { class: "dot", d: `M${X(N - 1).toFixed(2)},${Y(last).toFixed(2)}l0,0` }))
   return svg
 }
 
@@ -884,8 +927,8 @@ function makeCard(node) {
   }
 }
 
-/* ── one node as a list row: name and load on the left, the latest latency of
-   up to three probes in the middle, ↓ ↑ stacked on the right ── */
+/* ── one node as a list row: name and load on the left, up to three probes in
+   the middle (name, last hour's line, latest ms), ↓ ↑ stacked on the right ── */
 
 /** A probe's name cut to fit a column: the carrier when it names one, else its start. */
 function probeShort(name) {
@@ -901,7 +944,7 @@ function makeRow(node) {
   ref.name = h("span")
   ref.cc = h("span", { class: "cc" })
   ref.sub = h("div", { class: "sub" })
-  ref.lat = h("div", { class: "lat-mini" })
+  ref.lat = h("div", { class: "lanes" })
   ref.rx = h("span")
   ref.tx = h("span")
   ref.net = h("div", { class: "net" }, ref.rx, ref.tx)
@@ -917,17 +960,17 @@ function makeRow(node) {
   let latKey = ""
   const drawLat = () => {
     const rows = wants() ? pingCache.get(cur.id)?.rows?.slice(0, 3) : null
-    const key = rows ? JSON.stringify(rows.map((r) => [r.name, r.last, r.loss])) : "none"
+    const key = rows ? JSON.stringify(rows.map((r) => [r.name, r.last, r.loss, r.vals.length, r.vals[r.vals.length - 1]])) : "none"
     if (key === latKey) return
     latKey = key
     clear(ref.lat)
     if (!rows || !rows.length) return
-    ref.lat.style.setProperty("--cols", rows.length)
-    for (const r of rows) ref.lat.append(h("span", { class: "k", title: r.name, text: probeShort(r.name) }))
     for (const r of rows) {
       const cls = r.last == null || r.loss >= 5 ? "v bad" : r.loss >= 1 ? "v warn" : "v"
-      ref.lat.append(h("span", { class: cls, title: `${r.name} ${r.last == null ? "超时" : Math.round(r.last) + " ms"}${r.loss ? ` · 丢包 ${r.loss < 1 ? "<1" : Math.round(r.loss)}%` : ""}`,
-        text: r.last == null ? "超时" : String(Math.round(r.last)) }))
+      ref.lat.append(h("div", { class: "lane", title: `${r.name} ${r.last == null ? "超时" : Math.round(r.last) + " ms"}${r.loss ? ` · 丢包 ${r.loss < 1 ? "<1" : Math.round(r.loss)}%` : ""}` },
+        h("span", { class: "k", text: probeShort(r.name) }),
+        sparkline(r.vals, { w: 80, h: 12 }),
+        h("span", { class: cls, text: r.last == null ? "超时" : String(Math.round(r.last)) })))
     }
   }
   pingWatch.set(node.id, drawLat)
