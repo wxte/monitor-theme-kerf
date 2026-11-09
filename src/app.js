@@ -1107,6 +1107,7 @@ function makeRow(node) {
   ref.dot = h("i", { class: "dot" })
   ref.name = h("span")
   ref.cc = h("span", { class: "cc" })
+  ref.osn = h("span", { class: "osn" })     // the system's icon, where the row has no column for it
   ref.sub = h("div", { class: "sub" })
   ref.lat = h("div", { class: "lanes" })
   ref.rx = h("span")
@@ -1114,7 +1115,7 @@ function makeRow(node) {
   ref.net = h("div", { class: "net" }, ref.rx, ref.tx)
   ref.os = h("div", { class: "os" })      // shown where the row is wide enough
   const el = h("a", { class: "row", href: `/node/${encodeURIComponent(node.id)}`, "data-route": true },
-    h("div", { class: "who" }, h("div", { class: "nm" }, ref.dot, ref.name, ref.cc), ref.sub),
+    h("div", { class: "who" }, h("div", { class: "nm" }, ref.dot, ref.name, ref.cc, ref.osn), ref.sub),
     ref.os, ref.lat, ref.net, h("span", { class: "go", "aria-hidden": true, text: "→" }))
 
   const wants = () => state.config.show_latency && cur.online
@@ -1169,6 +1170,9 @@ function makeRow(node) {
         ref.os.replaceChildren(...(name ? [osIcon(n.os),
           h("div", { class: "os-t" }, h("span", { text: name }), more ? h("small", { text: more }) : null)] : []))
         ref.os.title = [osName(n.os), n.kernel].filter(Boolean).join(" · ")
+        const icon = osIcon(n.os)
+        ref.osn.replaceChildren(...(icon ? [icon] : []))
+        ref.osn.title = ref.os.title
       }
       const m = n.online ? n.metrics : null
       ref.dot.className = `dot ${n.online ? (m ? "on" : "wait") : "off"}`
@@ -1364,10 +1368,9 @@ function updateNode() {
   if (ex) add("到期", `${ex}${n.expires_at ? ` · ${String(n.expires_at).slice(0, 10)}` : ""}`)
   if (n.group) add("分组", n.group)
   add("agent", n.agent_version, true)
-  // present only for a signed-in operator
-  if (n.hostname) add("主机名", n.hostname, true)
-  if (n.ip) add("地址", n.ip, true)
-  if (n.remark) add("私有备注", n.remark)
+  // The hub sends hostname, addresses and the private note only to a signed-in
+  // operator, but this page is the public one and gets screenshotted and shared
+  // while signed in; they stay in the panel.
   const key = JSON.stringify(rows)
   if (key !== r.specKey) {
     r.specKey = key

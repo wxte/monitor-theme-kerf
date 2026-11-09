@@ -414,7 +414,16 @@ section[id], header[id] { scroll-margin-top: 80px; }
 .row .nm { display: flex; align-items: center; gap: 10px; color: var(--ink); font-weight: 500; font-size: 17px; line-height: 24px; min-width: 0; }
 .row .nm span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .row .nm .cc { flex: none; display: flex; align-items: center; }
-.row .sub { font-size: 13px; line-height: 18px; color: var(--body); margin: 3px 0 0 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* the row is paint-contained (content-visibility), so the dot's halo and its
+   breathing ring need room inside it */
+.row .nm .dot { margin-left: 5px; }
+/* the system icon gives way to the name: it takes only the room left over, and
+   when it does not fit it wraps onto a second line that is cut off */
+.row .nm .osn { flex: 1 1 0; min-width: 0; height: 22px; display: flex; flex-wrap: wrap; align-items: center; overflow: hidden; margin-left: -2px; }
+.row .nm .osn::before { content: ""; width: 0; height: 22px; }
+.row .nm .osn:empty { display: none; }
+.row .nm .osn .os-i { width: 14px; height: 14px; opacity: .5; }
+.row .sub { font-size: 13px; line-height: 18px; color: var(--body); margin: 3px 0 0 23px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .row .sub .bad { color: var(--bad); }
 .row .sub .warn { color: var(--warn); }
 .row .sub .sep { color: var(--mute); }
@@ -434,7 +443,7 @@ section[id], header[id] { scroll-margin-top: 80px; }
 .lane .v.bad, .lane .v.bad i { color: var(--bad); }
 
 /* operating system: only where the row has room for it */
-.row .os { display: none; align-items: center; gap: 10px; min-width: 0; }
+.row > .os { display: none; align-items: center; gap: 10px; min-width: 0; }
 .os-i { width: 20px; height: 20px; flex: none; fill: currentColor; color: var(--ink); opacity: .72; }
 .os-t { display: flex; flex-direction: column; min-width: 0; font-size: 13px; line-height: 18px; }
 .os-t span, .os-t small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -442,7 +451,8 @@ section[id], header[id] { scroll-margin-top: 80px; }
 .os-t small { font-family: var(--font-mono); font-size: 11px; line-height: 16px; color: var(--mute); }
 @media (min-width: 1024px) {
   .row { grid-template-columns: minmax(0, 1fr) 150px 340px 104px 16px; gap: 28px; }
-  .row .os { display: flex; }
+  .row > .os { display: flex; }
+  .row .nm .osn { display: none; }
   .lanes { gap: 4px; }
   .lane { grid-template-columns: 32px minmax(0, 1fr) 76px; gap: 8px; height: 14px; }
   .lane .sp, .lane .spark-w { height: 14px; }
@@ -455,7 +465,8 @@ section[id], header[id] { scroll-margin-top: 80px; }
   .lane .v i { font-size: 9.5px; }
   .row .go { display: none; }
   .row .sub .wide, .row .sub .remark { display: none; }
-  .row .nm { font-size: 16px; }
+  .row .nm { font-size: 15px; gap: 8px; }
+  .row .sub { margin-left: 21px; }
   .row .net { font-size: 11.5px; min-width: 0; }
 }
 @media (max-width: 359px) {
@@ -580,7 +591,7 @@ section[id], header[id] { scroll-margin-top: 80px; }
   .big .num { font-size: 28px; line-height: 40px; }
   .big { min-height: 40px; }
   .row { padding: 14px 2px; gap: 12px; }
-  .row .nm { font-size: 16px; line-height: 24px; }
+  .row .nm { font-size: 15px; line-height: 22px; }
   .row:active { background: var(--surface-soft); }
 
   .closing { padding: 32px 0 40px; gap: 10px; }
