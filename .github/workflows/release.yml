@@ -1,42 +1,58 @@
 name: release
 
+# Runs when a v* tag is pushed, or when a release is published from the
+# GitHub web page (which creates the tag at the same time). Either way the
+# release ends up carrying theme.tar.gz, the file the panel installs from.
 on:
   push:
     tags: ["v*"]
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.event.release.tag_name || github.ref_name }}
+
 jobs:
   publish:
     runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.release.tag_name || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          ref: ${{ github.event.release.tag_name || github.ref }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
 
       # The panel's one-click update compares the release tag with theme.json's
       # version (v1.2.0 ↔ 1.2.0); a mismatch would reinstall on every check.
-      - if: startsWith(github.ref, 'refs/tags/')
+      - if: github.event_name != 'workflow_dispatch'
         run: |
           V=v$(node -p 'require("./theme.json").version')
-          [ "$GITHUB_REF_NAME" = "$V" ] || { echo "::error::tag $GITHUB_REF_NAME, theme.json $V"; exit 1; }
+          [ "$TAG" = "$V" ] || { echo "::error::tag $TAG, theme.json $V"; exit 1; }
 
       - run: sh tools/pack.sh
       - run: sha256sum theme.tar.gz | cut -d' ' -f1 | tee theme.tar.gz.sha256
 
       # The panel's "install from GitHub" only reads a file named exactly
       # theme.tar.gz from the latest full release (not a prerelease or draft).
-      - if: startsWith(github.ref, 'refs/tags/')
-        run: gh release create "$GITHUB_REF_NAME" theme.tar.gz theme.tar.gz.sha256 --generate-notes --repo "$GITHUB_REPOSITORY"
+      - if: github.event_name != 'workflow_dispatch'
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" theme.tar.gz theme.tar.gz.sha256 --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" theme.tar.gz theme.tar.gz.sha256 --generate-notes --repo "$GITHUB_REPOSITORY"
+          fi
         env:
           GH_TOKEN: ${{ github.token }}
 
-      - if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+      - if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
           name: theme

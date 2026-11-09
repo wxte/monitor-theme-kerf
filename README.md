@@ -83,14 +83,10 @@ MOCK_NOWS=1 node tools/mock-hub.mjs     # WebSocket 被拒，测试轮询兜底
 
 ## 发布
 
-1. 改 `theme.json` 的 `version`，提交
-2. 打同名 tag 并推送：
+1. 改 `theme.json` 的 `version`（比如 `1.0.1`），提交到 main
+2. 在 GitHub 仓库页右侧 **Releases → Draft a new release**，tag 填 `v1.0.1`（和 version 对上，前面加 v），点 **Publish release**
 
-```sh
-git tag v1.0.0 && git push origin v1.0.0
-```
-
-`.github/workflows/release.yml` 会检查 tag 与 `version` 一致（`v1.0.0` 对 `1.0.0`，不一致时一键更新会每次都重装），打包、校验 gzip 尾部，然后创建 release 并上传 `theme.tar.gz`。
+`.github/workflows/release.yml` 会自动检查 tag 与 `version` 一致（不一致时面板的一键更新会每次都重装），打包、校验 gzip 尾部，然后把 `theme.tar.gz` 上传到这个 release。也可以直接推送 tag：`git tag v1.0.1 && git push origin v1.0.1`，效果相同。
 
 本地打包：`sh tools/pack.sh`。
 
