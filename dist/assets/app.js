@@ -556,7 +556,7 @@ function updateHome() {
     item.update(n)
     r.list.append(item.el)          // re-appending keeps the operator's order
   })
-  for (const [id, item] of list) if (!seen.has(id)) { item.el.remove(); list.delete(id) }
+  for (const [id, item] of list) if (!seen.has(id)) { item.destroy?.(); item.el.remove(); list.delete(id) }
   r.empty.hidden = !state.nodes || nodes.length > 0
 
   // closing band
@@ -602,28 +602,81 @@ function setMeter(m, p, text) {
   setText(m.v, text ?? (p == null ? "—" : pct(p, 0)))
 }
 
-function feats(n, c) {
-  const out = []
-  const m = n.online ? n.metrics : null
-  const memTotal = n.mem_total || m?.mem_total
-  const diskTotal = n.disk_total || m?.disk_total
-  if (n.cpu_cores > 0) out.push([`${n.cpu_cores} vCPU`, n.cpu_name ? ` (${cpuName(n.cpu_name)})` : ""])
-  if (memTotal > 0) out.push([`${size(memTotal)} 内存`, diskTotal > 0 ? ` · ${size(diskTotal)} 磁盘` : ""])
-  if (m) out.push([`↓ ${rate(m.net_rx)}`, `  ↑ ${rate(m.net_tx)}`])
-  const used = monthUsed(n)
-  if (n.traffic_limit > 0) {
-    const p = (used / n.traffic_limit) * 100
-    out.push([`本期 ${bytes(used)}`, ` / ${size(n.traffic_limit)}`, p >= 90 ? "warn" : null])
-  } else if (used > 0) out.push([`本期 ${bytes(used)}`, " / ∞"])
-  const os = [osName(n.os), n.arch, n.virt].filter(Boolean)
-  if (os.length) out.push([os[0], os.length > 1 ? ` · ${os.slice(1).join(" · ")}` : ""])
-  if (m) out.push([`运行 ${uptime(m.uptime)}`, ` · 负载 ${m.load.map((x) => x.toFixed(2)).join(" ")}`])
-  if (c.show_expiry) {
-    const d = expiryDays(n)
-    const t = expiryText(d)
-    if (t) out.push([t, "", d < 0 ? "bad" : d <= 7 ? "warn" : null])
+/* ── latency on cards: the last hour of each probe, fetched only for cards on
+   screen, at most once a minute each and three at a time ── */
+
+const PING_TTL = 60_000
+const pingCache = new Map()        // node id → { at, rows | null }
+const pingWatch = new Map()        // node id → re-render callback
+const pingQueue = []
+let pingActive = 0
+const onScreen = new Set()
+
+function summarizePing(d) {
+  const ping = Array.isArray(d?.ping) ? d.ping.filter((p) => p && isNum(p.ts)) : []
+  if (!ping.length) return []
+  const probes = d.probes && typeof d.probes === "object" ? d.probes : {}
+  const loss = d.loss && typeof d.loss === "object" ? d.loss : null
+  // in the order the operator arranged the probes
+  return [...new Set(ping.map((p) => p.task_id))].map((id) => {
+    const vals = ping.filter((p) => p.task_id === id).map((p) => (typeof p.latency === "number" ? p.latency : null))
+    let last = null
+    for (let i = vals.length - 1; i >= 0; i--) if (vals[i] != null) { last = vals[i]; break }
+    return { id, name: String(probes[id] ?? `探测 ${id}`), vals, last, loss: loss ? Number(loss[id]) || 0 : null }
+  })
+}
+
+function wantPing(id) {
+  const c = pingCache.get(id)
+  if (c && Date.now() - c.at < PING_TTL) return
+  if (pingQueue.includes(id) || c?.loading) return
+  pingQueue.push(id)
+  pumpPing()
+}
+function pumpPing() {
+  while (pingActive < 3 && pingQueue.length) {
+    const id = pingQueue.shift()
+    if (!onScreen.has(id) || document.hidden) continue
+    pingActive++
+    const prev = pingCache.get(id)
+    pingCache.set(id, { ...(prev || {}), loading: true, at: prev?.at ?? 0 })
+    api(`/nodes/${encodeURIComponent(id)}/metrics?hours=1&points=60&series=ping`)
+      .then((d) => pingCache.set(id, { at: Date.now(), rows: summarizePing(d) }))
+      // keep what was shown; try again after the TTL
+      .catch(() => pingCache.set(id, { at: Date.now(), rows: prev?.rows ?? null }))
+      .finally(() => { pingActive--; pingWatch.get(id)?.(); pumpPing() })
   }
-  return out
+}
+
+const seenObserver = typeof IntersectionObserver === "function"
+  ? new IntersectionObserver((entries) => {
+    for (const e of entries) {
+      const id = e.target.__nodeId
+      if (e.isIntersecting) { onScreen.add(id); if (e.target.__wantsPing?.()) wantPing(id) }
+      else onScreen.delete(id)
+    }
+  }, { rootMargin: "200px 0px" })
+  : null
+
+function sparkline(vals) {
+  const W = 64, H = 18
+  const nums = vals.filter((v) => v != null)
+  const svg = s("svg", { class: "spark", viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: "none", "aria-hidden": true })
+  if (nums.length < 2) return svg
+  let lo = Math.min(...nums), hi = Math.max(...nums)
+  if (hi - lo < 4) { const mid = (hi + lo) / 2; lo = mid - 2; hi = mid + 2 }
+  const n = vals.length
+  let d = ""
+  let pen = false
+  vals.forEach((v, i) => {
+    if (v == null) { pen = false; return }
+    const x = n === 1 ? W / 2 : (i / (n - 1)) * W
+    const y = H - 1.5 - ((v - lo) / (hi - lo)) * (H - 3)
+    d += `${pen ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}`
+    pen = true
+  })
+  svg.append(s("path", { d }))
+  return svg
 }
 
 function makeCard(node) {
@@ -634,26 +687,60 @@ function makeCard(node) {
   ref.cc = h("span", { class: "card-cc" })
   ref.num = h("span", { class: "num" })
   ref.unit = h("span", { class: "unit" })
+  ref.note = h("div", { class: "card-note", hidden: true })
   ref.cpu = meterRow("CPU")
   ref.mem = meterRow("内存")
   ref.disk = meterRow("磁盘")
-  ref.meters = h("div", { class: "meters" }, ref.cpu.el, ref.mem.el, ref.disk.el)
-  ref.feats = h("ul", { class: "feats" })
+  ref.traffic = meterRow("流量")
+  ref.meters = h("div", { class: "meters" }, ref.cpu.el, ref.mem.el, ref.disk.el, ref.traffic.el)
+  ref.lat = h("div", { class: "lat", hidden: true })
   ref.link = h("a", { class: "btn btn-primary btn-block", href: `/node/${encodeURIComponent(node.id)}`, "data-route": true, text: "查看详情" })
   const el = h("article", { class: "card", tabindex: -1 },
     h("div", { class: "card-head" },
       h("div", { class: "t" }, h("div", { class: "card-name" }, ref.dot, ref.name), ref.desc),
       ref.cc),
-    h("div", { class: "big" }, ref.num, ref.unit),
-    ref.link, ref.meters, ref.feats)
+    h("div", null, h("div", { class: "big" }, ref.num, ref.unit), ref.note),
+    ref.link, ref.meters, ref.lat)
   el.addEventListener("click", (e) => {
     if (e.target.closest("a") || getSelection()?.toString()) return
     go(`/node/${encodeURIComponent(node.id)}`)
   })
-  let last = ""
+
+  let cur = node
+  const wants = () => state.config.show_latency && cur.online
+  el.__nodeId = node.id
+  el.__wantsPing = wants
+  seenObserver?.observe(el)
+  if (!seenObserver) onScreen.add(node.id)
+
+  let latKey = ""
+  const drawLat = () => {
+    const rows = wants() ? pingCache.get(cur.id)?.rows : null
+    const key = rows ? JSON.stringify(rows.map((r) => [r.name, r.last, r.loss, r.vals.length, r.vals[r.vals.length - 1]])) : "none"
+    if (key === latKey) return
+    latKey = key
+    ref.lat.hidden = !rows || rows.length === 0
+    clear(ref.lat)
+    if (!rows) return
+    const MAX = 3
+    for (const r of rows.slice(0, MAX)) {
+      const lossCls = r.loss == null ? "loss" : r.loss >= 5 ? "loss bad" : r.loss >= 1 ? "loss warn" : "loss"
+      ref.lat.append(h("div", { class: "lat-row" },
+        h("span", { class: "nm", text: r.name }),
+        sparkline(r.vals),
+        h("span", { class: "ms", text: r.last == null ? "超时" : `${Math.round(r.last)} ms` }),
+        h("span", { class: lossCls, title: "最近 1 小时丢包率",
+          text: r.loss == null ? "" : r.loss === 0 ? "0%" : r.loss < 1 ? "<1%" : `${Math.round(r.loss)}%` })))
+    }
+    if (rows.length > MAX) ref.lat.append(h("div", { class: "lat-more", text: `另有 ${rows.length - MAX} 条线路，在详情里查看` }))
+  }
+  pingWatch.set(node.id, drawLat)
+
   return {
     el,
+    destroy() { seenObserver?.unobserve(el); onScreen.delete(node.id); pingWatch.delete(node.id) },
     update(n) {
+      cur = n
       const c = state.config
       const m = n.online ? n.metrics : null
       ref.dot.className = `dot ${n.online ? (m ? "on" : "wait") : "off"}`
@@ -673,30 +760,36 @@ function makeCard(node) {
         setText(ref.unit, "CPU")
         ref.num.classList.remove("off")
       } else {
-        const ago = sinceSeen(n)
         setText(ref.num, n.online ? "等待上报" : "离线")
-        setText(ref.unit, n.online ? "" : ago == null ? "从未上报" : `${uptime(ago)}前`)
+        setText(ref.unit, "")
         ref.num.classList.toggle("off", !n.online)
       }
-      if (c.show_price && n.price > 0 && !n.online) {
-        const ago = sinceSeen(n)
-        setText(ref.unit, `${per(n.billing_cycle)} · 离线${ago == null ? "" : ` ${uptime(ago)}`}`)
-      }
 
-      ref.meters.hidden = !m
+      // one short status line under the price: offline time, a near or past expiry
+      clear(ref.note)
+      const notes = []
+      if (!n.online) {
+        const ago = sinceSeen(n)
+        notes.push(["bad", ago == null ? "从未上报" : `离线 ${uptime(ago)}`])
+      } else if (!m) notes.push(["warn", "已连接，等待首次上报"])
+      const d = c.show_expiry ? expiryDays(n) : null
+      if (d != null && d <= 7) notes.push([d < 0 ? "bad" : "warn", expiryText(d)])
+      notes.forEach(([cls, t], i) => append(ref.note, [i ? h("span", { class: "sep", text: " · " }) : null, h("span", { class: cls, text: t })]))
+      ref.note.hidden = notes.length === 0
+
+      for (const r of [ref.cpu, ref.mem, ref.disk]) r.el.hidden = !m
       if (m) {
         setMeter(ref.cpu, m.cpu)
         setMeter(ref.mem, ratio(m.mem_used, m.mem_total))
         setMeter(ref.disk, ratio(m.disk_used, m.disk_total))
       }
+      const used = monthUsed(n)
+      ref.traffic.el.hidden = !(n.traffic_limit > 0)
+      if (n.traffic_limit > 0) setMeter(ref.traffic, (used / n.traffic_limit) * 100)
+      ref.meters.hidden = !m && !(n.traffic_limit > 0)
 
-      const items = feats(n, c)
-      const key = JSON.stringify(items)
-      if (key !== last) {
-        last = key
-        clear(ref.feats)
-        for (const [a, b, cls] of items) ref.feats.append(h("li", { class: cls }, h("span", null, a, b ? h("span", { class: "dim", text: b }) : null)))
-      }
+      if (wants() && onScreen.has(n.id)) wantPing(n.id)
+      drawLat()
     },
   }
 }

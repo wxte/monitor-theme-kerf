@@ -338,13 +338,23 @@ section[id], header[id] { scroll-margin-top: 80px; }
 .meter .bar i.hot { background: var(--bad); }
 .meter .v { font-family: var(--font-mono); font-size: 13px; line-height: 18px; color: var(--ink); text-align: right; }
 
-.feats { list-style: none; display: flex; flex-direction: column; gap: 10px; border-top: 1px solid var(--hairline); padding-top: 20px; }
-.feats li { display: flex; gap: 10px; font-size: 14px; line-height: 20px; color: var(--charcoal); min-width: 0; }
-.feats li::before { content: "✓"; color: var(--ink); flex: none; font-family: var(--font-mono); }
-.feats li span { min-width: 0; overflow-wrap: anywhere; }
-.feats li .dim { color: var(--mute); }
-.feats li.warn::before { content: "!"; color: var(--warn); }
-.feats li.bad::before { content: "×"; color: var(--bad); }
+.big .unit { white-space: nowrap; }
+.card-note { font-size: 13px; line-height: 18px; margin-top: 2px; }
+.card-note .bad { color: var(--bad); }
+.card-note .warn { color: var(--warn); }
+.card-note .sep { color: var(--mute); }
+
+/* latency block: probe name, last hour sparkline, last latency, window loss */
+.lat { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--hairline); padding-top: 16px; }
+.lat-row { display: grid; grid-template-columns: minmax(0, 1fr) 64px 52px 36px; align-items: center; gap: 10px; font-size: 13px; line-height: 18px; }
+.lat-row .nm { color: var(--charcoal); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lat-row .spark { width: 64px; height: 18px; overflow: visible; }
+.lat-row .spark path { fill: none; stroke: var(--mute); stroke-width: 1.25; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+.lat-row .ms { font-family: var(--font-mono); color: var(--ink); text-align: right; white-space: nowrap; }
+.lat-row .loss { font-family: var(--font-mono); font-size: 12px; color: var(--mute); text-align: right; white-space: nowrap; }
+.lat-row .loss.warn { color: var(--warn); }
+.lat-row .loss.bad { color: var(--bad); }
+.lat-more { font-size: 12px; color: var(--mute); }
 
 /* list layout: FAQ-row treatment */
 .rows { border-top: 1px solid var(--hairline); }

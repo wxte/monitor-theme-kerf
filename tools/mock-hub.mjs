@@ -87,7 +87,9 @@ function history(id, hours, points, series) {
     if (series !== "ping") out.metrics.push({ ts, minutes: step / 60, cpu: m.cpu, cpu_max: Math.min(100, m.cpu * 1.6),
       mem_used: m.mem_used, disk_used: m.disk_used + (ts - now + span) * 2000, swap_used: m.swap_used,
       net_rx: m.net_rx, net_tx: m.net_tx, net_rx_max: m.net_rx * 1.8 * spike, net_tx_max: m.net_tx * 1.5, tcp: m.tcp, udp: m.udp, procs: m.procs })
-    if (series !== "metrics") for (const [task, base] of [[1, 38], [2, 52], [3, 71]]) {
+    // node 5 has no latency probes; node 3 has a single one
+    const tasks = n.id === 5 ? [] : n.id === 3 ? [[1, 38]] : [[1, 38], [2, 52], [3, 71]]
+    if (series !== "metrics") for (const [task, base] of tasks) {
       const lost = task === 2 && Math.random() < 0.01
       out.ping.push({ task_id: task, ts, latency: lost ? null : Math.round(base + Math.sin(ts / 3000 + task) * 6 + Math.random() * 4 + (Math.random() < 0.01 ? 40 : 0)),
         ...(Math.random() < 0.03 ? { loss: 8 } : {}) })

@@ -2,7 +2,7 @@
 export const manifest = {
   "name": "Kerf",
   "short": "kerf",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "config": [
     {
       "type": "title",
@@ -70,10 +70,18 @@ export const manifest = {
       "default": true
     },
     {
+      "key": "show_latency",
+      "type": "boolean",
+      "label": "显示延迟",
+      "default": true,
+      "help": "卡片上显示各延迟线路最近 1 小时的延迟和丢包率；只请求屏幕上看得到的卡片，每分钟一次"
+    },
+    {
       "key": "show_expiry",
       "type": "boolean",
-      "label": "显示到期",
-      "default": true
+      "label": "到期提醒",
+      "default": true,
+      "help": "7 天内到期或已过期时在卡片上提示，到期日期在节点详情里"
     },
     {
       "type": "title",
