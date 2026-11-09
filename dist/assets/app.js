@@ -75,11 +75,15 @@ const cpuName = (name = "") =>
 const MONEY = new Map()
 function money(amount, currency) {
   try {
-    let f = MONEY.get(currency)
+    // whole amounts drop the decimals (US$49), others keep up to two (€4.50)
+    const whole = Number.isInteger(amount)
+    const key = `${currency}:${whole}`
+    let f = MONEY.get(key)
     if (!f) {
       // zh-CN fixed: US$ / HK$ / JP¥ stay distinct from the yuan's ¥
-      f = new Intl.NumberFormat("zh-CN", { style: "currency", currency, maximumFractionDigits: 2 })
-      MONEY.set(currency, f)
+      f = new Intl.NumberFormat("zh-CN", { style: "currency", currency,
+        minimumFractionDigits: whole ? 0 : 2, maximumFractionDigits: whole ? 0 : 2 })
+      MONEY.set(key, f)
     }
     return f.format(amount)
   } catch {
@@ -297,8 +301,23 @@ function parseRoute() {
   const m = /^\/node\/([^/]+)\/?$/.exec(location.pathname)
   return m ? { name: "node", id: decodeURIComponent(m[1]) } : { name: "home" }
 }
+// Coming back from a node page puts the card that was opened back where it sat
+// on screen; the page above it may have changed height in the meantime.
+let homeScroll = null
+let homeAnchor = null
+let cameFromHome = false
+let pressedNode = null
+if ("scrollRestoration" in history) history.scrollRestoration = "manual"
+document.addEventListener("click", (e) => { pressedNode = e.target.closest?.(".card, .row") || null }, true)
+document.addEventListener("keydown", (e) => { pressedNode = e.target.closest?.(".card, .row") || null }, true)
+
 function go(path) {
   if (location.pathname + location.hash === path) return
+  if (home) {
+    homeScroll = window.scrollY
+    homeAnchor = pressedNode?.__nodeId != null ? { id: pressedNode.__nodeId, top: pressedNode.getBoundingClientRect().top } : null
+    cameFromHome = true
+  } else cameFromHome = false
   const url = new URL(path, location.href)
   // same page, different anchor: just scroll
   if (url.pathname === location.pathname && home) {
@@ -316,7 +335,16 @@ document.addEventListener("click", (e) => {
   e.preventDefault()
   go(a.getAttribute("href"))
 })
-window.addEventListener("popstate", () => route())
+function restoreHome() {
+  window.scrollTo({ top: homeScroll, behavior: "instant" })
+  const item = homeAnchor && (home?.cards.get(homeAnchor.id) || home?.rows.get(homeAnchor.id))
+  if (item) window.scrollBy({ top: item.el.getBoundingClientRect().top - homeAnchor.top, behavior: "instant" })
+}
+window.addEventListener("popstate", () => {
+  const backHome = parseRoute().name === "home" && homeScroll != null && !home
+  route()
+  if (backHome && !location.hash) { restoreHome(); requestAnimationFrame(restoreHome) }
+})
 
 /* ════════════════════════ group helpers ════════════════════════ */
 
@@ -352,6 +380,8 @@ function toggleTheme() {
   const next = dark ? "light" : "dark"
   root.dataset.theme = next
   try { localStorage.setItem("kerf-theme", next) } catch { /* private mode */ }
+  // the phone's browser bar follows the visitor's choice too
+  for (const m of document.querySelectorAll('meta[name="theme-color"]')) m.setAttribute("content", next === "dark" ? "#0a0a0a" : "#ffffff")
 }
 
 const shell = {}
@@ -359,13 +389,12 @@ function buildShell() {
   const app = document.getElementById("app")
   clear(app)
   shell.siteName = h("span", { text: "Monitor" })
-  shell.footName = h("span", { text: "Monitor" })
   shell.admin = h("a", { class: "btn btn-primary btn-sm", href: "/admin/", text: "登录" })
   shell.navHome = h("a", { href: "/#overview", "data-route": true, text: "概览" })
   shell.navNodes = h("a", { href: "/#nodes", "data-route": true, text: "节点" })
   shell.banner = h("div", { class: "banner", role: "status", hidden: true })
   shell.main = h("main", { id: "main" })
-  shell.footText = h("p", { hidden: true })
+  shell.footText = h("span", { class: "note", hidden: true })
   shell.footYear = h("span")
 
   app.append(
@@ -381,30 +410,12 @@ function buildShell() {
     shell.banner,
     shell.main,
     h("footer", { class: "foot" },
-      h("div", { class: "wrap" },
-        h("div", { class: "foot-grid" },
-          h("div", null,
-            h("a", { class: "brand", href: "/", "data-route": true },
-              h("img", { src: "/favicon.svg", alt: "", width: 24, height: 24 }), shell.footName),
-            shell.footText),
-          h("div", { class: "foot-cols" },
-            h("div", null, h("h4", { text: "状态" }),
-              h("ul", null,
-                h("li", null, h("a", { href: "/#overview", "data-route": true, text: "概览" })),
-                h("li", null, h("a", { href: "/#nodes", "data-route": true, text: "节点" })))),
-            h("div", null, h("h4", { text: "站点" }),
-              h("ul", null,
-                h("li", null, h("a", { href: "/admin/", text: "后台" })),
-                h("li", null, h("a", { href: "https://github.com/monitor-probe/monitor", target: "_blank", rel: "noopener", text: "monitor" })))))),
-        h("div", { class: "foot-bottom" },
-          h("span", null, "© ", shell.footYear),
-          h("span", { class: "mono", text: `theme ${manifest.short} ${manifest.version}`.trim() })))))
+      h("div", { class: "wrap foot-in" }, shell.footText, h("span", { class: "copy" }, "© ", shell.footYear))))
 }
 
 function updateShell() {
   const name = state.me?.site_name || "Monitor"
   setText(shell.siteName, name)
-  setText(shell.footName, name)
   setText(shell.footYear, `${new Date().getFullYear()} ${name}`)
   setText(shell.admin, state.me?.authed ? "进入后台" : "登录")
   const ft = state.config.footer_text
@@ -500,10 +511,22 @@ function updateHome() {
         return h("button", { class: "tab", type: "button", "aria-pressed": pressed ? "true" : "false",
           on: { click: () => { state.group = sel; r.groupsKey = null; updateHome() } } }, h("span", { text: label }), count)
       }
-      r.tabs.append(h("div", { class: "tabs-in", role: "group", "aria-label": "分组" },
+      const strip = h("div", { class: "tabs-in", role: "group", "aria-label": "分组" },
         tab("全部", null),
         groups.map((g) => tab(g, { name: g })),
-        hasUngrouped ? tab("未分组", { name: "" }) : null))
+        hasUngrouped ? tab("未分组", { name: "" }) : null)
+      r.tabs.append(strip)
+      const edges = () => {
+        const max = strip.scrollWidth - strip.clientWidth
+        strip.classList.toggle("fade-l", strip.scrollLeft > 2)
+        strip.classList.toggle("fade-r", strip.scrollLeft < max - 2)
+      }
+      strip.addEventListener("scroll", edges, { passive: true })
+      requestAnimationFrame(() => {
+        const on = strip.querySelector('[aria-pressed="true"]')
+        if (on && strip.scrollWidth > strip.clientWidth) strip.scrollLeft = on.offsetLeft - (strip.clientWidth - on.offsetWidth) / 2
+        edges()
+      })
     }
   }
   if (r.tabCount) {
@@ -520,21 +543,22 @@ function updateHome() {
   clear(r.chip)
   if (state.nodes) {
     const countries = [...new Set(nodes.map(cc).filter(Boolean))]
-    const shown = countries.slice(0, 5)
+    const room = innerWidth < 640 ? 3 : 5
+    const shown = countries.slice(0, room)
     append(r.chip, [
       h("b", { text: `${sum.online} 在线` }),
       sum.offline ? [h("span", { class: "sep", text: "·" }), h("b", { text: `${sum.offline} 离线` })] : null,
       shown.length ? [h("span", { class: "sep", text: "—" }),
         shown.map((x, i) => [i ? h("span", { class: "sep", text: "·" }) : null, h("span", { text: x })]),
-        countries.length > 5 ? h("span", { text: `+${countries.length - 5}` }) : null] : null])
+        countries.length > room ? h("span", { text: `+${countries.length - room}` }) : null] : null])
   } else {
     r.chip.append(h("span", { text: "正在连接…" }))
   }
 
   // section copy
   setText(r.sectionLede, state.group
-    ? `${state.group.name || "未分组"} · ${sum.total} 个节点，汇总数字跟随所选分组。`
-    : `共 ${sum.total} 个节点${groups.length ? `，${groups.length} 个分组` : ""}。点进任意节点查看历史曲线与延迟。`)
+    ? `${state.group.name || "未分组"} · ${sum.total} 个节点`
+    : `${sum.total} 个节点${groups.length ? ` · ${groups.length} 个分组` : ""}`)
 
   // stats strip
   setText(r.stats.online, `${sum.online}/${sum.total}`)
@@ -585,7 +609,7 @@ function updateTerminal(r, nodes, sum, site) {
       h("span", { class: "v" }, m ? [h("span", { class: "lo", text: "↓" }), rateShort(m.net_rx)] : ""),
       h("span", { class: "v wide" }, m ? [h("span", { class: "lo", text: "↑" }), rateShort(m.net_tx)] : ""))
   })
-  setText(r.termNote, `# live snapshot · ${state.updatedAt ? clock(state.updatedAt) : "--:--:--"} · pushed every 2s`)
+  setText(r.termNote, `# live · ${state.updatedAt ? clock(state.updatedAt) : "--:--:--"} · every 2s`)
 }
 
 /* ── one node as a pricing-style card ── */
@@ -676,6 +700,11 @@ function sparkline(vals) {
     pen = true
   })
   svg.append(s("path", { d }))
+  vals.forEach((v, i) => {
+    if (v != null) return
+    const x = n === 1 ? W / 2 : (i / (n - 1)) * W
+    svg.append(s("line", { class: "miss", x1: x, x2: x, y1: H - 4, y2: H }))
+  })
   return svg
 }
 
@@ -716,7 +745,7 @@ function makeCard(node) {
   ref.lat = h("div", { class: "lat", hidden: true })
   ref.feats = h("ul", { class: "feats", hidden: true })
   ref.link = h("a", { class: "btn btn-primary btn-block", href: `/node/${encodeURIComponent(node.id)}`, "data-route": true, text: "查看详情" })
-  const el = h("article", { class: "card", tabindex: -1 },
+  const el = h("article", { class: "card", tabindex: 0, role: "link", "aria-label": node.name },
     h("div", { class: "card-head" },
       h("div", { class: "t" }, h("div", { class: "card-name" }, ref.dot, ref.name), ref.desc),
       ref.cc),
@@ -725,6 +754,9 @@ function makeCard(node) {
   el.addEventListener("click", (e) => {
     if (e.target.closest("a") || getSelection()?.toString()) return
     go(`/node/${encodeURIComponent(node.id)}`)
+  })
+  el.addEventListener("keydown", (e) => {
+    if (e.target === el && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); go(`/node/${encodeURIComponent(node.id)}`) }
   })
 
   let cur = node
@@ -767,6 +799,7 @@ function makeCard(node) {
       const m = n.online ? n.metrics : null
       ref.dot.className = `dot ${n.online ? (m ? "on" : "wait") : "off"}`
       setText(ref.name, n.name)
+      el.setAttribute("aria-label", n.name)
       const desc = n.public_remark || ""
       ref.desc.hidden = !desc
       setText(ref.desc, desc)
@@ -924,7 +957,12 @@ function renderNode(id) {
   r.spec = h("dl", { class: "spec" })
 
   shell.main.append(
-    h("div", { class: "wrap crumb" }, h("a", { href: "/#nodes", "data-route": true, text: "← 全部节点" })),
+    h("div", { class: "wrap crumb" }, h("a", { href: "/#nodes", text: "← 全部节点", on: { click: (e) => {
+      if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+      e.preventDefault()
+      // back to where the visitor was on the list, when that is where they came from
+      if (cameFromHome) history.back(); else go("/#nodes")
+    } } })),
     h("section", { class: "node-hero" },
       h("div", { class: "wrap stack" }, r.title, r.lede, r.chip)),
     h("div", { class: "wrap" },
@@ -936,18 +974,24 @@ function renderNode(id) {
       h("div", { class: "panel" },
         h("div", { class: "panel-head" }, h("span", { class: "panel-title", text: "节点信息" })),
         r.spec)),
-    h("div", { style: { height: "80px" } }))
+    h("div", { class: "page-end" }))
 
   // chart tabs
   for (const [key, label] of [["metrics", "资源"], ["ping", "延迟"]]) {
     r.tabSeg.append(h("button", { type: "button", "data-k": key, text: label,
-      on: { click: () => { r.tab = key; syncSeg(); loadHistory() } } }))
+      on: { click: () => { r.tab = key; remember(); syncSeg(); loadHistory() } } }))
   }
   const hours = windows(state.me?.history_days ?? 7)
   r.hours = hours.includes(6) ? 6 : hours[0]
+  try {
+    const saved = JSON.parse(localStorage.getItem("kerf-chart") || "{}")
+    if (saved.tab === "metrics" || saved.tab === "ping") r.tab = saved.tab
+    if (hours.includes(saved.hours)) r.hours = saved.hours
+  } catch { /* storage unavailable */ }
+  const remember = () => { try { localStorage.setItem("kerf-chart", JSON.stringify({ tab: r.tab, hours: r.hours })) } catch { /* ignore */ } }
   for (const x of hours) {
     r.rangeSeg.append(h("button", { type: "button", "data-k": String(x), text: windowLabel(x),
-      on: { click: () => { r.hours = x; syncSeg(); loadHistory() } } }))
+      on: { click: () => { r.hours = x; remember(); syncSeg(); loadHistory() } } }))
   }
   function syncSeg() {
     for (const b of r.tabSeg.children) b.setAttribute("aria-pressed", String(b.dataset.k === r.tab))
@@ -1087,7 +1131,10 @@ function drawHistory() {
     tipFmt: memTotal ? (v) => `${pct(v)} · ${bytes((v / 100) * memTotal)}` : (v) => bytes(v),
     series: [{ name: "内存", ...PALETTE[0], area: true,
       pts: rows.map((p) => [t(p), num(p.mem_used) == null ? null : memTotal ? (p.mem_used / memTotal) * 100 : p.mem_used]) }] })
+  const lastNum = (key) => { for (let i = rows.length - 1; i >= 0; i--) if (isNum(rows[i][key])) return rows[i][key]; return null }
+  const rxNow = lastNum("net_rx"), txNow = lastNum("net_tx")
   add({ label: "网络", gap, fmt: (v) => rateShort(v), tipFmt: (v) => rate(v),
+    current: rxNow == null ? "" : `↓ ${rateShort(rxNow)}  ↑ ${rateShort(txNow ?? 0)}`,
     series: [
       { name: "↓ 下行", ...PALETTE[0], pts: rows.map((p) => [t(p), num(p.net_rx)]), peak: rows.map((p) => num(p.net_rx_max)) },
       { name: "↑ 上行", color: "var(--term-red)", pts: rows.map((p) => [t(p), num(p.net_tx)]), peak: rows.map((p) => num(p.net_tx_max)) }] })
@@ -1115,7 +1162,7 @@ function drawPing(d) {
       gap: medianStep(pts.map((p) => p[0] / 1000)) * 3 * 1000, loss: Number(loss[id]) || 0,
       avg: avg(pts.map((p) => p[1])) }
   })
-  const c = chart({ label: "延迟", tall: true, fmt: (v) => `${Math.round(v)} ms`, tipFmt: (v) => `${Math.round(v)} ms`, series })
+  const c = chart({ label: "延迟", tall: true, current: "", fmt: (v) => `${Math.round(v)} ms`, tipFmt: (v) => `${Math.round(v)} ms`, series })
   r.chartBox.append(c.el)
   r.charts.push(c)
   r.chartBox.append(h("div", { class: "legend" },
@@ -1160,7 +1207,7 @@ function timeLabel(ms, span) {
  * A small SVG line chart. series: [{ name, color, dash?, area?, pts: [[ms, v|null]], gap? }]
  * Lines break across nulls and across gaps wider than `gap` ms.
  */
-function chart({ label, series, max, fmt, tipFmt, gap, tall }) {
+function chart({ label, series, max, fmt, tipFmt, gap, tall, current }) {
   const svgEl = s("svg", { role: "img", "aria-label": label })
   const tip = h("div", { class: "tip", hidden: true })
   const cur = h("span", { class: "v" })
@@ -1177,13 +1224,13 @@ function chart({ label, series, max, fmt, tipFmt, gap, tall }) {
   const top = max ?? (isBytes ? niceBytesMax(vmax * 1.1) : niceMax(vmax * 1.1))
   const lastOf = (sr) => { for (let i = sr.pts.length - 1; i >= 0; i--) if (sr.pts[i][1] != null) return sr.pts[i][1]; return null }
   const first = series[0] && lastOf(series[0])
-  setText(cur, series.length === 1 && first != null ? (tipFmt || fmt)(first) : "")
+  setText(cur, current !== undefined ? current : first != null ? (tipFmt || fmt)(first) : "")
 
   let geom = null
   function draw() {
     const W = Math.max(200, el.clientWidth || svgEl.clientWidth || 600)
     const H = svgEl.clientHeight || (tall ? 220 : 140)
-    const padL = 0, padR = 52, padT = 6, padB = 18
+    const padL = 0, padR = W < 480 ? 44 : 52, padT = 6, padB = 18
     const iw = W - padL - padR, ih = H - padT - padB
     const span = Math.max(1, xs1 - xs0)
     const X = (x) => padL + ((x - xs0) / span) * iw
@@ -1232,7 +1279,7 @@ function chart({ label, series, max, fmt, tipFmt, gap, tall }) {
     if (lo > 0 && Math.abs(p[lo - 1][0] - x) < Math.abs(p[lo][0] - x)) best = lo - 1
     return best
   }
-  svgEl.addEventListener("pointermove", (e) => {
+  const onPoint = (e) => {
     if (!geom || !Number.isFinite(xs0)) return
     const rect = svgEl.getBoundingClientRect()
     const px = ((e.clientX - rect.left) / rect.width) * geom.W
@@ -1254,7 +1301,9 @@ function chart({ label, series, max, fmt, tipFmt, gap, tall }) {
     tip.hidden = false
     const left = (geom.X(tx) / geom.W) * rect.width
     tip.style.left = `${Math.min(Math.max(0, left + 12), rect.width - tip.offsetWidth)}px`
-  })
+  }
+  svgEl.addEventListener("pointermove", onPoint)
+  svgEl.addEventListener("pointerdown", onPoint)
   svgEl.addEventListener("pointerleave", () => {
     tip.hidden = true
     if (geom) geom.hover.setAttribute("visibility", "hidden")

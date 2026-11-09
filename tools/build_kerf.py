@@ -34,6 +34,10 @@ CHARS = (
     " .,:;!?'\"-–—_/\\|()[]{}<>@#$%&*+=^~`·•→←↑↓°×…¥€£©®™"
 )
 
+# glyphs left whole: a cut at their junction reads as damage, not as a pen lift
+# (the 3's two arcs meet in a point, so the cut lands across a curve)
+NO_CUT = set("3")
+
 os.makedirs(OUT, exist_ok=True)
 static_path = os.path.join(OUT, "_static.ttf")
 vf = TTFont(SRC)
@@ -282,7 +286,7 @@ for ch in CHARS:
     if ch == " ":
         continue
     mask, ox = render(ch)
-    cut = stencil(mask)
+    cut = mask if ch in NO_CUT else stencil(mask)
     g, n = contours_to_glyph(cut, ox)
     glyf[name] = g
     g.recalcBounds(glyf)
