@@ -82,6 +82,24 @@ function enter(el, i) {
   void el.offsetWidth
   el.style.animationDelay = `${Math.min(i, 12) * 45}ms`
   el.classList.add("enter")
+  // once played, the class goes: a node the browser re-attaches would replay it
+  const done = (e) => {
+    if (e.target !== el) return
+    el.classList.remove("enter")
+    el.style.animationDelay = ""
+    el.removeEventListener("animationend", done)
+  }
+  el.addEventListener("animationend", done)
+}
+
+/**
+ * Put `el` at position `i` of `parent` only when it is not already there.
+ * Moving a node detaches and re-attaches it, which restarts every CSS
+ * animation inside it; done on every push, that reads as a flicker.
+ */
+function place(parent, el, i) {
+  const at = parent.children[i]
+  if (at !== el) parent.insertBefore(el, at || null)
 }
 const clear = (el) => { while (el.firstChild) el.firstChild.remove() }
 
@@ -674,7 +692,7 @@ function updateHome() {
     if (!item) { item = make(n); list.set(n.id, item); enter(item.el, fresh++) }
     else if (regroup) enter(item.el, i)
     item.update(n)
-    r.list.append(item.el)          // re-appending keeps the operator's order
+    place(r.list, item.el, i)       // the operator's order, without moving what is in place
   })
   for (const [id, item] of list) if (!seen.has(id)) { item.destroy?.(); item.el.remove(); list.delete(id) }
   r.empty.hidden = !state.nodes || nodes.length > 0
@@ -788,7 +806,8 @@ const seenObserver = typeof IntersectionObserver === "function"
  */
 let sparkSeq = 0
 function sparkline(vals, { w = 64, h = 18, motion = null } = {}) {
-  const svg = s("svg", { class: `spark${motion && !calm.matches ? ` ${motion}` : ""}`, viewBox: `0 0 ${w} ${h}`, preserveAspectRatio: "none", "aria-hidden": true })
+  const animated = motion && !calm.matches
+  const svg = s("svg", { class: `spark${animated ? ` ${motion}` : ""}`, viewBox: `0 0 ${w} ${h}`, preserveAspectRatio: "none", "aria-hidden": true })
   // bucket
   const N = Math.min(28, vals.length)
   if (N < 2) return svg
@@ -849,6 +868,7 @@ function sparkline(vals, { w = 64, h = 18, motion = null } = {}) {
     const at = `M${X(N - 1).toFixed(2)},${Y(last).toFixed(2)}l0,0`
     svg.append(s("path", { class: "halo", d: at }), s("path", { class: "dot", d: at }))
   }
+  if (animated) setTimeout(() => svg.classList.remove(motion), 1800)
   return svg
 }
 
@@ -1051,7 +1071,7 @@ function makeRow(node) {
         lane.el = h("div", { class: "lane" }, lane.k, lane.sparkAt, lane.v)
         lanes.set(r.id, lane)
       }
-      ref.lat.append(lane.el)
+      place(ref.lat, lane.el, rows.indexOf(r))
       const sig = JSON.stringify([r.vals.length, r.vals[r.vals.length - 1], r.vals[0]])
       if (sig !== lane.sig) {
         lane.sparkAt.replaceChildren(sparkline(r.vals, { w: 80, h: 12, motion: lane.sig ? "shift" : "draw" }))
