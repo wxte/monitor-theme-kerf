@@ -48,7 +48,8 @@ const easeOutBack = (t) => { const c = 1.6; return 1 + (c + 1) * (t - 1) ** 3 + 
 
 /**
  * Like setText, but a number that changes rolls to its new value with a small
- * overshoot. Only the figure moves; a change of unit (K/s → M/s) just swaps.
+ * overshoot, and briefly lights up. Kept for figures that change rarely (the
+ * latency, once a minute): on the 2-second figures it would never stop moving.
  */
 function setNum(el, text) {
   if (!el) return
@@ -64,10 +65,15 @@ function setNum(el, text) {
   }
   const from = parseFloat(a[2]), to = parseFloat(b[2])
   const digits = (b[2].split(".")[1] || "").length
-  const t0 = performance.now(), dur = 700
+  const t0 = performance.now(), dur = 900
+  el.classList.remove("bump")
+  void el.offsetWidth
+  el.classList.add("bump")
+  setTimeout(() => el.classList.remove("bump"), 1200)
   const step = (now) => {
     const t = Math.min(1, (now - t0) / dur)
-    const v = from + (to - from) * easeOutBack(t)
+    let v = from + (to - from) * easeOutBack(t)
+    if (from >= 0 && to >= 0) v = Math.max(0, v)
     el.__shown = t < 1 ? `${b[1]}${v.toFixed(digits)}${b[3]}` : text
     el.textContent = el.__shown
     if (t < 1) el.__raf = requestAnimationFrame(step)
@@ -671,10 +677,10 @@ function updateHome() {
     : `${sum.total} 个节点${groups.length ? ` · ${groups.length} 个分组` : ""}`)
 
   // stats strip
-  setNum(r.stats.online, `${sum.online}/${sum.total}`)
-  setNum(r.stats.rx, rate(sum.rx))
-  setNum(r.stats.tx, rate(sum.tx))
-  setNum(r.stats.month, bytes(sum.month))
+  setText(r.stats.online, `${sum.online}/${sum.total}`)
+  setText(r.stats.rx, rate(sum.rx))
+  setText(r.stats.tx, rate(sum.tx))
+  setText(r.stats.month, bytes(sum.month))
 
   // terminal report
   if (c.show_terminal) updateTerminal(r, nodes, sum, site)
@@ -737,7 +743,7 @@ function setMeter(m, p, text) {
   const w = p == null ? 0 : Math.max(0, Math.min(100, p))
   m.bar.style.width = `${w}%`
   m.bar.classList.toggle("hot", w >= 90)
-  setNum(m.v, text ?? (p == null ? "—" : pct(p, 0)))
+  setText(m.v, text ?? (p == null ? "—" : pct(p, 0)))
 }
 
 /* ── latency on cards: the last hour of each probe, fetched only for cards on
@@ -1118,8 +1124,8 @@ function makeRow(node) {
 
       ref.net.hidden = !m
       if (m) {
-        setNum(ref.rx, `↓ ${rateShort(m.net_rx)}`)
-        setNum(ref.tx, `↑ ${rateShort(m.net_tx)}`)
+        setText(ref.rx, `↓ ${rateShort(m.net_rx)}`)
+        setText(ref.tx, `↑ ${rateShort(m.net_tx)}`)
       }
       if (wants() && onScreen.has(n.id)) wantPing(n.id)
       drawLat()

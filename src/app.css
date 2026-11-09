@@ -591,11 +591,15 @@ section[id], header[id] { scroll-margin-top: 80px; }
 
   /* new data slides the line along */
   .spark.shift { animation: shift .9s cubic-bezier(.22, 1, .36, 1) both; }
-  @keyframes shift { from { transform: translateX(8%); opacity: .35; } to { transform: none; opacity: 1; } }
+  @keyframes shift { from { transform: translateX(14%); opacity: .2; } 60% { opacity: 1; } to { transform: none; opacity: 1; } }
 
   /* the latest reading breathes out a ring */
   .spark .halo { animation: halo 2.6s ease-out 1.2s infinite; }
   @keyframes halo { 0% { stroke-width: 3.5; opacity: .45; } 70%, 100% { stroke-width: 12; opacity: 0; } }
+
+  /* a latency that just changed lights up as it rolls */
+  .bump { display: inline-block; animation: bump .9s cubic-bezier(.34, 1.56, .64, 1); }
+  @keyframes bump { 0% { transform: translateY(0); } 25% { transform: translateY(-3px) scale(1.08); color: var(--ok); } 100% { transform: none; } }
 
   /* online nodes breathe */
   .dot.on { animation: alive 2.8s ease-in-out infinite; }
