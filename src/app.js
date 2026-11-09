@@ -39,6 +39,50 @@ function append(el, kids) {
   }
 }
 const setText = (el, t) => { if (el && el.textContent !== t) el.textContent = t }
+
+/* ── motion ── */
+const calm = matchMedia("(prefers-reduced-motion: reduce)")
+const NUM = /^([^\d-]*)(-?\d+(?:\.\d+)?)(.*)$/s
+// overshoots a little, then settles: the springy part of every animation here
+const easeOutBack = (t) => { const c = 1.6; return 1 + (c + 1) * (t - 1) ** 3 + c * (t - 1) ** 2 }
+
+/**
+ * Like setText, but a number that changes rolls to its new value with a small
+ * overshoot. Only the figure moves; a change of unit (K/s → M/s) just swaps.
+ */
+function setNum(el, text) {
+  if (!el) return
+  const prev = el.__shown ?? el.textContent
+  if (el.__target === text) return
+  el.__target = text
+  const a = NUM.exec(prev), b = NUM.exec(text)
+  cancelAnimationFrame(el.__raf)
+  if (!a || !b || a[1] !== b[1] || a[3] !== b[3] || a[2] === b[2] || calm.matches || document.hidden) {
+    el.textContent = text
+    el.__shown = text
+    return
+  }
+  const from = parseFloat(a[2]), to = parseFloat(b[2])
+  const digits = (b[2].split(".")[1] || "").length
+  const t0 = performance.now(), dur = 700
+  const step = (now) => {
+    const t = Math.min(1, (now - t0) / dur)
+    const v = from + (to - from) * easeOutBack(t)
+    el.__shown = t < 1 ? `${b[1]}${v.toFixed(digits)}${b[3]}` : text
+    el.textContent = el.__shown
+    if (t < 1) el.__raf = requestAnimationFrame(step)
+  }
+  el.__raf = requestAnimationFrame(step)
+}
+
+/** Items float up one after another; restarted when the list they belong to changes. */
+function enter(el, i) {
+  if (calm.matches) return
+  el.classList.remove("enter")
+  void el.offsetWidth
+  el.style.animationDelay = `${Math.min(i, 12) * 45}ms`
+  el.classList.add("enter")
+}
 const clear = (el) => { while (el.firstChild) el.firstChild.remove() }
 
 /* ════════════════════════ formatting ════════════════════════ */
@@ -523,7 +567,7 @@ function updateHome() {
   const groups = groupsOf(all)
   const hasUngrouped = groups.length > 0 && all.some((n) => !(n.group ?? ""))
   if (state.group && !(state.group.name === "" ? hasUngrouped : groups.includes(state.group.name))) state.group = null
-  const key = JSON.stringify([groups, hasUngrouped, state.group?.name ?? null])
+  const key = JSON.stringify([groups, hasUngrouped])
   if (key !== r.groupsKey) {
     r.groupsKey = key
     clear(r.tabs)
@@ -534,14 +578,16 @@ function updateHome() {
         const count = h("span", { class: "count" })
         r.tabCount.set(sel === null ? null : sel.name, count)
         const pressed = sel === null ? state.group === null : state.group?.name === sel.name
-        return h("button", { class: "tab", type: "button", "aria-pressed": pressed ? "true" : "false",
-          on: { click: () => { state.group = sel; r.groupsKey = null; updateHome() } } }, h("span", { text: label }), count)
+        return h("button", { class: "tab", type: "button", "aria-pressed": pressed ? "true" : "false", "data-sel": sel === null ? "\u0000all" : sel.name,
+          on: { click: () => { state.group = sel; r.regroup = true; updateHome() } } }, h("span", { text: label }), count)
       }
-      const strip = h("div", { class: "tabs-in", role: "group", "aria-label": "分组" },
+      r.pill = h("i", { class: "tab-pill", "aria-hidden": true })
+      const strip = h("div", { class: "tabs-in", role: "group", "aria-label": "分组" }, r.pill,
         tab("全部", null),
         groups.map((g) => tab(g, { name: g })),
         hasUngrouped ? tab("未分组", { name: "" }) : null)
       r.tabs.append(strip)
+      r.strip = strip
       const edges = () => {
         const max = strip.scrollWidth - strip.clientWidth
         strip.classList.toggle("fade-l", strip.scrollLeft > 2)
@@ -554,6 +600,23 @@ function updateHome() {
         edges()
       })
     }
+  }
+  if (r.strip) {
+    const want = state.group === null ? "\u0000all" : state.group.name
+    let on = null
+    for (const b of r.strip.querySelectorAll(".tab")) {
+      const pressed = b.dataset.sel === want
+      b.setAttribute("aria-pressed", pressed ? "true" : "false")
+      if (pressed) on = b
+    }
+    if (on) requestAnimationFrame(() => {
+      r.pill.style.width = `${on.offsetWidth}px`
+      r.pill.style.transform = `translateX(${on.offsetLeft - 4}px)`
+      if (r.regroupScroll !== want && r.strip.scrollWidth > r.strip.clientWidth) {
+        r.strip.scrollTo({ left: on.offsetLeft - (r.strip.clientWidth - on.offsetWidth) / 2, behavior: r.regroupScroll ? "smooth" : "instant" })
+      }
+      r.regroupScroll = want
+    })
   }
   if (r.tabCount) {
     for (const [name, el] of r.tabCount) {
@@ -590,10 +653,10 @@ function updateHome() {
     : `${sum.total} 个节点${groups.length ? ` · ${groups.length} 个分组` : ""}`)
 
   // stats strip
-  setText(r.stats.online, `${sum.online}/${sum.total}`)
-  setText(r.stats.rx, rate(sum.rx))
-  setText(r.stats.tx, rate(sum.tx))
-  setText(r.stats.month, bytes(sum.month))
+  setNum(r.stats.online, `${sum.online}/${sum.total}`)
+  setNum(r.stats.rx, rate(sum.rx))
+  setNum(r.stats.tx, rate(sum.tx))
+  setNum(r.stats.month, bytes(sum.month))
 
   // terminal report
   if (c.show_terminal) updateTerminal(r, nodes, sum, site)
@@ -602,10 +665,14 @@ function updateHome() {
   const list = c.layout === "list" ? r.rows : r.cards
   const make = c.layout === "list" ? makeRow : makeCard
   const seen = new Set()
-  nodes.forEach((n) => {
+  const regroup = r.regroup
+  r.regroup = false
+  let fresh = 0
+  nodes.forEach((n, i) => {
     seen.add(n.id)
     let item = list.get(n.id)
-    if (!item) { item = make(n); list.set(n.id, item) }
+    if (!item) { item = make(n); list.set(n.id, item); enter(item.el, fresh++) }
+    else if (regroup) enter(item.el, i)
     item.update(n)
     r.list.append(item.el)          // re-appending keeps the operator's order
   })
@@ -652,13 +719,15 @@ function setMeter(m, p, text) {
   const w = p == null ? 0 : Math.max(0, Math.min(100, p))
   m.bar.style.width = `${w}%`
   m.bar.classList.toggle("hot", w >= 90)
-  setText(m.v, text ?? (p == null ? "—" : pct(p, 0)))
+  setNum(m.v, text ?? (p == null ? "—" : pct(p, 0)))
 }
 
 /* ── latency on cards: the last hour of each probe, fetched only for cards on
    screen, at most once a minute each and three at a time ── */
 
-const PING_TTL = 60_000
+// the hub writes probe results once a minute; checking twice a minute shows a
+// new minute within half a minute of it existing
+const PING_TTL = 30_000
 const pingCache = new Map()        // node id → { at, rows | null }
 const pingWatch = new Map()        // node id → re-render callback
 const pingQueue = []
@@ -718,8 +787,8 @@ const seenObserver = typeof IntersectionObserver === "function"
  * flat instead of being magnified into noise. Timeouts mark the baseline red.
  */
 let sparkSeq = 0
-function sparkline(vals, { w = 64, h = 18 } = {}) {
-  const svg = s("svg", { class: "spark", viewBox: `0 0 ${w} ${h}`, preserveAspectRatio: "none", "aria-hidden": true })
+function sparkline(vals, { w = 64, h = 18, motion = null } = {}) {
+  const svg = s("svg", { class: `spark${motion && !calm.matches ? ` ${motion}` : ""}`, viewBox: `0 0 ${w} ${h}`, preserveAspectRatio: "none", "aria-hidden": true })
   // bucket
   const N = Math.min(28, vals.length)
   if (N < 2) return svg
@@ -776,7 +845,10 @@ function sparkline(vals, { w = 64, h = 18 } = {}) {
     if (v == null) svg.append(s("path", { class: "miss", d: `M${X(i).toFixed(2)},${h - 3}V${h}` }))
   })
   const last = sm[N - 1]
-  if (last != null) svg.append(s("path", { class: "dot", d: `M${X(N - 1).toFixed(2)},${Y(last).toFixed(2)}l0,0` }))
+  if (last != null) {
+    const at = `M${X(N - 1).toFixed(2)},${Y(last).toFixed(2)}l0,0`
+    svg.append(s("path", { class: "halo", d: at }), s("path", { class: "dot", d: at }))
+  }
   return svg
 }
 
@@ -844,6 +916,7 @@ function makeCard(node) {
     const rows = wants() ? pingCache.get(cur.id)?.rows : null
     const key = rows ? JSON.stringify(rows.map((r) => [r.name, r.last, r.loss, r.vals.length, r.vals[r.vals.length - 1]])) : "none"
     if (key === latKey) return
+    const drawn = latKey !== "" && latKey !== "none"
     latKey = key
     ref.lat.hidden = !rows || rows.length === 0
     clear(ref.lat)
@@ -853,7 +926,7 @@ function makeCard(node) {
       const lossCls = r.loss == null ? "loss" : r.loss >= 5 ? "loss bad" : r.loss >= 1 ? "loss warn" : "loss"
       ref.lat.append(h("div", { class: "lat-row" },
         h("span", { class: "nm", text: r.name }),
-        sparkline(r.vals),
+        sparkline(r.vals, { motion: drawn ? "shift" : "draw" }),
         h("span", { class: "ms", text: r.last == null ? "超时" : `${Math.round(r.last)} ms` }),
         h("span", { class: lossCls, title: "最近 1 小时丢包率",
           text: r.loss == null ? "" : r.loss === 0 ? "0%" : r.loss < 1 ? "<1%" : `${Math.round(r.loss)}%` })))
@@ -930,6 +1003,9 @@ function makeCard(node) {
 /* ── one node as a list row: name and load on the left, up to three probes in
    the middle (name, last hour's line, latest ms), ↓ ↑ stacked on the right ── */
 
+/** A window's loss: 0%, 0.5%, 3%, 12% — one decimal only below ten. */
+const lossText = (l) => (l == null ? "—" : l === 0 ? "0%" : l < 10 ? `${(Math.round(l * 10) / 10).toString()}%` : `${Math.round(l)}%`)
+
 /** A probe's name cut to fit a column: the carrier when it names one, else its start. */
 function probeShort(name) {
   const carrier = /电信|联通|移动|广电|教育网|CT|CU|CM/i.exec(name)
@@ -958,20 +1034,35 @@ function makeRow(node) {
   seenObserver?.observe(el)
   if (!seenObserver) onScreen.add(node.id)
   let latKey = ""
+  const lanes = new Map()
   const drawLat = () => {
     const rows = wants() ? pingCache.get(cur.id)?.rows?.slice(0, 3) : null
     const key = rows ? JSON.stringify(rows.map((r) => [r.name, r.last, r.loss, r.vals.length, r.vals[r.vals.length - 1]])) : "none"
     if (key === latKey) return
     latKey = key
-    clear(ref.lat)
-    if (!rows || !rows.length) return
-    for (const r of rows) {
-      const cls = r.last == null || r.loss >= 5 ? "v bad" : r.loss >= 1 ? "v warn" : "v"
-      ref.lat.append(h("div", { class: "lane", title: `${r.name} ${r.last == null ? "超时" : Math.round(r.last) + " ms"}${r.loss ? ` · 丢包 ${r.loss < 1 ? "<1" : Math.round(r.loss)}%` : ""}` },
-        h("span", { class: "k", text: probeShort(r.name) }),
-        sparkline(r.vals, { w: 80, h: 12 }),
-        h("span", { class: cls, text: r.last == null ? "超时" : String(Math.round(r.last)) })))
-    }
+    if (!rows || !rows.length) { clear(ref.lat); lanes.clear(); return }
+    const ids = rows.map((r) => r.id)
+    for (const id of [...lanes.keys()]) if (!ids.includes(id)) { lanes.get(id).el.remove(); lanes.delete(id) }
+    rows.forEach((r) => {
+      let lane = lanes.get(r.id)
+      if (!lane) {
+        lane = { k: h("span", { class: "k" }), ms: h("b"), loss: h("i"), sparkAt: h("span", { class: "sp" }) }
+        lane.v = h("span", { class: "v" }, lane.ms, lane.loss)
+        lane.el = h("div", { class: "lane" }, lane.k, lane.sparkAt, lane.v)
+        lanes.set(r.id, lane)
+      }
+      ref.lat.append(lane.el)
+      const sig = JSON.stringify([r.vals.length, r.vals[r.vals.length - 1], r.vals[0]])
+      if (sig !== lane.sig) {
+        lane.sparkAt.replaceChildren(sparkline(r.vals, { w: 80, h: 12, motion: lane.sig ? "shift" : "draw" }))
+        lane.sig = sig
+      }
+      setText(lane.k, probeShort(r.name))
+      lane.el.title = `${r.name} ${r.last == null ? "超时" : Math.round(r.last) + " ms"} · 最近 1 小时丢包 ${lossText(r.loss)}`
+      lane.v.className = r.last == null || r.loss >= 5 ? "v bad" : r.loss >= 1 ? "v warn" : "v"
+      setNum(lane.ms, r.last == null ? "超时" : String(Math.round(r.last)))
+      setText(lane.loss, r.loss == null ? "" : `·${lossText(r.loss)}`)
+    })
   }
   pingWatch.set(node.id, drawLat)
 
@@ -1007,8 +1098,8 @@ function makeRow(node) {
 
       ref.net.hidden = !m
       if (m) {
-        setText(ref.rx, `↓ ${rateShort(m.net_rx)}`)
-        setText(ref.tx, `↑ ${rateShort(m.net_tx)}`)
+        setNum(ref.rx, `↓ ${rateShort(m.net_rx)}`)
+        setNum(ref.tx, `↑ ${rateShort(m.net_tx)}`)
       }
       if (wants() && onScreen.has(n.id)) wantPing(n.id)
       drawLat()
