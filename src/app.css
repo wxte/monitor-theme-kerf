@@ -287,6 +287,9 @@ section[id], header[id] { scroll-margin-top: 80px; }
   .stats.home .stat:nth-child(4) { order: 3; }
 }
 
+.stat .val .rates { display: inline-flex; gap: 12px; font-weight: 500; font-size: 17px; letter-spacing: 0; }
+.stat .val .rates i { font-style: normal; color: var(--mute); margin-right: 3px; font-weight: 400; }
+@media (max-width: 639px) { .stat .val .rates { font-size: 15px; gap: 8px; } }
 .page-end { height: 64px; }
 
 /* group tabs */

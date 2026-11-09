@@ -1027,7 +1027,7 @@ function renderNode(id) {
       h("div", { class: "wrap stack" }, r.title, r.lede, r.chip)),
     h("div", { class: "wrap" },
       h("div", { class: "stats", style: { marginBottom: "16px" } },
-        stat("cpu", "CPU"), stat("mem", "内存"), stat("disk", "磁盘"), stat("net", "网速 ↓ / ↑")),
+        stat("cpu", "CPU"), stat("mem", "内存"), stat("disk", "磁盘"), stat("net", "网速")),
       h("div", { class: "panel" },
         h("div", { class: "panel-head" }, r.tabSeg, r.rangeSeg),
         r.chartBox),
@@ -1103,7 +1103,9 @@ function updateNode() {
     val("cpu", pct(m.cpu), `${n.cpu_cores || ""} 核`.trim())
     val("mem", pct(ratio(m.mem_used, m.mem_total), 0), bytes(m.mem_used))
     val("disk", pct(ratio(m.disk_used, m.disk_total), 0), bytes(m.disk_used))
-    val("net", rateShort(m.net_rx), ` / ${rateShort(m.net_tx)}`)
+    // rates, not shares of a capacity: one quiet line, both directions alike
+    clear(r.stats.net)
+    r.stats.net.append(h("span", { class: "rates" }, h("span", null, h("i", { text: "↓" }), rateShort(m.net_rx)), h("span", null, h("i", { text: "↑" }), rateShort(m.net_tx))))
   } else for (const k of ["cpu", "mem", "disk", "net"]) val(k, "—")
 
   // spec sheet
