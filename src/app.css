@@ -3,19 +3,31 @@
 
 @font-face {
   font-family: "Kerf";
-  src: url("/fonts/kerf.woff") format("woff");
+  src: url("/fonts/kerf.woff2") format("woff2");
   font-weight: 100 900;
   font-display: swap;
 }
 @font-face {
   font-family: "Space Grotesk";
-  src: url("/fonts/space-grotesk.woff") format("woff");
+  src: url("/fonts/space-grotesk.woff2") format("woff2");
   font-weight: 400 700;
   font-display: swap;
 }
+/* Local fonts stretched to the web fonts' measure, so text keeps its place
+   while the web fonts load (Arial and Liberation Sans share one set of widths). */
+@font-face {
+  font-family: "Space Grotesk Fallback";
+  src: local("Arial"), local("ArialMT"), local("Liberation Sans"), local("Helvetica Neue"), local("Roboto");
+  size-adjust: 107.4%; ascent-override: 91.62%; descent-override: 27.19%; line-gap-override: 0%;
+}
+@font-face {
+  font-family: "Kerf Fallback";
+  src: local("Arial"), local("ArialMT"), local("Liberation Sans"), local("Helvetica Neue"), local("Roboto");
+  size-adjust: 101.58%; ascent-override: 98.44%; descent-override: 24.61%; line-gap-override: 0%;
+}
 @font-face {
   font-family: "JetBrains Mono";
-  src: url("/fonts/jetbrains-mono.woff") format("woff");
+  src: url("/fonts/jetbrains-mono.woff2") format("woff2");
   font-weight: 400 700;
   font-display: swap;
 }
@@ -45,8 +57,8 @@
   --on-selection: #fff;
 
   --cjk: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", "Noto Sans CJK SC", "Source Han Sans SC";
-  --font-sans: "Space Grotesk", var(--cjk), system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --font-head: "Kerf", var(--cjk), system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-sans: "Space Grotesk", "Space Grotesk Fallback", var(--cjk), system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-head: "Kerf", "Kerf Fallback", var(--cjk), system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, var(--cjk), monospace;
 
   --radius: 12px;
@@ -331,6 +343,7 @@ section[id], header[id] { scroll-margin-top: 80px; }
 /* on phones the whole card is the tap target; the button only adds height */
 @media (max-width: 639px) { .card { padding: 20px; gap: 16px; } .card .btn-block { display: none; } }
 .card.is-off { background: var(--surface-soft); }
+.card { content-visibility: auto; contain-intrinsic-size: auto 340px; }
 .card-head { display: flex; align-items: flex-start; gap: 12px; }
 .card-head .t { min-width: 0; flex: 1; }
 .card-name { display: flex; align-items: center; gap: 8px; color: var(--ink); font-weight: 500; font-size: 18px; line-height: 26px; }
@@ -369,9 +382,9 @@ section[id], header[id] { scroll-margin-top: 80px; }
 
 /* latency block: probe name, last hour sparkline, last latency, window loss */
 .lat { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--hairline); padding-top: 16px; }
-.lat-row { display: grid; grid-template-columns: minmax(0, 1fr) 64px 52px 36px; align-items: center; gap: 10px; font-size: 13px; line-height: 18px; }
-.lat-row .nm { color: var(--charcoal); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.lat-row .spark { width: 64px; height: 18px; }
+.lat-row { display: grid; grid-template-columns: max-content minmax(48px, 1fr) 52px 36px; align-items: center; gap: 12px; font-size: 13px; line-height: 18px; }
+.lat-row .nm { color: var(--charcoal); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 7em; }
+.lat-row .spark-w { height: 18px; }
 .spark { display: block; overflow: visible; color: var(--ink); }
 .spark .line { fill: none; stroke: currentColor; stroke-opacity: .7; stroke-width: 1.2; vector-effect: non-scaling-stroke; stroke-linejoin: round; stroke-linecap: round; }
 .spark .dot { stroke: currentColor; stroke-width: 3.5; stroke-linecap: round; vector-effect: non-scaling-stroke; }
@@ -396,6 +409,7 @@ section[id], header[id] { scroll-margin-top: 80px; }
   padding: 14px 4px; border-bottom: 1px solid var(--hairline); cursor: pointer; transition: background .15s;
 }
 .row:hover { background: var(--surface-soft); }
+.row { content-visibility: auto; contain-intrinsic-size: auto 66px; }
 .row .who { min-width: 0; }
 .row .nm { display: flex; align-items: center; gap: 10px; color: var(--ink); font-weight: 500; font-size: 17px; line-height: 24px; min-width: 0; }
 .row .nm span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -412,7 +426,7 @@ section[id], header[id] { scroll-margin-top: 80px; }
 .lane { display: grid; grid-template-columns: 28px minmax(0, 1fr) 70px; align-items: center; gap: 6px; height: 12px; }
 .lane .sp { display: block; min-width: 0; height: 12px; }
 .lane .k { font-size: 10.5px; line-height: 12px; color: var(--mute); white-space: nowrap; overflow: hidden; }
-.lane .spark { width: 100%; height: 12px; }
+.lane .spark-w { height: 12px; }
 .lane .v { font-family: var(--font-mono); font-size: 11.5px; line-height: 12px; color: var(--ink); text-align: right; white-space: nowrap; }
 .lane .v b { font-weight: 400; }
 .lane .v i { font-style: normal; font-size: 10px; color: var(--mute); }
@@ -574,7 +588,10 @@ section[id], header[id] { scroll-margin-top: 80px; }
 }
 
 /* ═════════ motion: springy, never in the way ═════════ */
-.spark .halo { stroke: currentColor; stroke-width: 3.5; stroke-linecap: round; vector-effect: non-scaling-stroke; opacity: 0; }
+.spark-w { position: relative; display: block; width: 100%; height: 100%; color: var(--ink); }
+.spark-w .spark { width: 100%; height: 100%; }
+.spark-w .halo { position: absolute; right: -5px; width: 10px; height: 10px; margin-top: -5px; border-radius: 50%;
+  background: currentColor; opacity: 0; pointer-events: none; }
 @media (prefers-reduced-motion: no-preference) {
   /* meters spring to their value */
   .meter .bar i { transition: width .9s cubic-bezier(.34, 1.56, .64, 1); }
@@ -594,19 +611,19 @@ section[id], header[id] { scroll-margin-top: 80px; }
   @keyframes shift { from { transform: translateX(14%); opacity: .2; } 60% { opacity: 1; } to { transform: none; opacity: 1; } }
 
   /* the latest reading breathes out a ring */
-  .spark .halo { animation: halo 2.6s ease-out 1.2s infinite; }
-  @keyframes halo { 0% { stroke-width: 3.5; opacity: .45; } 70%, 100% { stroke-width: 12; opacity: 0; } }
+  /* a few rings after each new reading, then still: idle lines cost nothing */
+  .spark-w .halo { animation: halo 2.6s ease-out 1.2s 3; will-change: transform, opacity; }
+  @keyframes halo { 0% { transform: scale(.35); opacity: .4; } 70%, 100% { transform: scale(1.6); opacity: 0; } }
 
   /* a latency that just changed lights up as it rolls */
   .bump { display: inline-block; animation: bump .9s cubic-bezier(.34, 1.56, .64, 1); }
   @keyframes bump { 0% { transform: translateY(0); } 25% { transform: translateY(-3px) scale(1.08); color: var(--ok); } 100% { transform: none; } }
 
-  /* online nodes breathe */
-  .dot.on { animation: alive 2.8s ease-in-out infinite; }
-  @keyframes alive {
-    0%, 100% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--term-green) 18%, transparent); }
-    50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--term-green) 6%, transparent); }
-  }
+  /* online nodes breathe: a ring scaled and faded on the compositor, no repaint */
+  .dot.on { position: relative; }
+  .dot.on::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: var(--term-green);
+    opacity: 0; animation: alive 2.8s ease-out infinite; will-change: transform, opacity; }
+  @keyframes alive { 0% { transform: scale(1); opacity: .35; } 80%, 100% { transform: scale(2.4); opacity: 0; } }
 
   /* hover lifts a card a hair */
   .card { transition: border-color .15s, transform .45s cubic-bezier(.34, 1.56, .64, 1), box-shadow .45s; }

@@ -209,13 +209,16 @@ const clock = (d = new Date()) =>
 
 const cc = (node) => (typeof node.country === "string" && /^[A-Za-z]{2}$/.test(node.country) ? node.country.toUpperCase() : "")
 
+// rewritten by tools/build.mjs to the hashed directories under assets/
+const FLAG_DIRS = { grey: "/flags", color: "/flags-color" }
+
 /** A country as the operator chose to show it: its code, a colour flag or a grey one. */
 function flag(code) {
   if (!code) return null
   const style = state.config.country_style
   const text = () => h("span", { class: "flag-txt", text: code })
   if (style !== "color" && style !== "grey") return text()
-  const img = h("img", { class: `flag ${style}`, src: `/${style === "color" ? "flags-color" : "flags"}/${code.toLowerCase()}.png`,
+  const img = h("img", { class: `flag ${style}`, src: `${FLAG_DIRS[style]}/${code.toLowerCase()}.png`,
     alt: code, title: code, width: 16, height: 12, decoding: "async" })
   img.addEventListener("error", () => img.replaceWith(text()), { once: true })
   return img
@@ -695,9 +698,19 @@ function updateHome() {
   nodes.forEach((n, i) => {
     seen.add(n.id)
     let item = list.get(n.id)
-    if (!item) { item = make(n); list.set(n.id, item); enter(item.el, fresh++) }
-    else if (regroup) enter(item.el, i)
-    item.update(n)
+    if (!item) {
+      item = make(n)
+      list.set(n.id, item)
+      enter(item.el, fresh++)
+      item.update(n)
+      // an item scrolled into view catches up with the newest data
+      item.el.__show = () => { if (item.pending) { const p = item.pending; item.pending = null; item.update(p) } }
+    } else {
+      if (regroup) enter(item.el, i)
+      // off screen, the newest data waits: with hundreds of nodes, updating
+      // only what can be seen is most of the work saved
+      if (!seenObserver || onScreen.has(n.id)) { item.pending = null; item.update(n) } else item.pending = n
+    }
     place(r.list, item.el, i)       // the operator's order, without moving what is in place
   })
   for (const [id, item] of list) if (!seen.has(id)) { item.destroy?.(); item.el.remove(); list.delete(id) }
@@ -716,18 +729,33 @@ function updateTerminal(r, nodes, sum, site) {
   setText(r.termHost, `HOST: ${location.host}  (${sum.online} online · ${sum.total} nodes)`)
   const load = (n) => (n.online && n.metrics ? n.metrics.net_rx + n.metrics.net_tx : -1)
   const top = [...nodes].sort((a, b) => load(b) - load(a)).slice(0, limit)
-  clear(r.termRows)
+  if (!r.termCells || r.termCells.length !== top.length) {
+    clear(r.termRows)
+    r.termCells = top.map((_, i) => {
+      const cell = (cls, label) => {
+        const v = h("span")
+        const el = h("span", { class: cls }, label ? h("span", { class: "lo", text: label }) : null, v)
+        return { el, v }
+      }
+      const row = { name: h("span"), code: h("small"), cpu: cell("v", "cpu "), mem: cell("v wide", "mem "), rx: cell("v", "↓"), tx: cell("v wide", "↑") }
+      r.termRows.append(h("span", { class: "n", text: `${i + 1}.` }), h("span", { class: "nm" }, row.name, row.code),
+        row.cpu.el, row.mem.el, row.rx.el, row.tx.el)
+      return row
+    })
+  }
   top.forEach((n, i) => {
     const m = n.online ? n.metrics : null
-    const code = cc(n)
-    r.termRows.append(
-      h("span", { class: "n", text: `${i + 1}.` }),
-      h("span", { class: "nm" }, n.name, code ? h("small", { text: code }) : null),
-      m ? h("span", { class: "v" }, h("span", { class: "lo", text: "cpu " }), pct(m.cpu))
-        : h("span", { class: "v off", text: n.online ? "waiting" : "offline" }),
-      h("span", { class: "v wide" }, m ? [h("span", { class: "lo", text: "mem " }), pct(ratio(m.mem_used, m.mem_total), 0)] : ""),
-      h("span", { class: "v" }, m ? [h("span", { class: "lo", text: "↓" }), rateShort(m.net_rx)] : ""),
-      h("span", { class: "v wide" }, m ? [h("span", { class: "lo", text: "↑" }), rateShort(m.net_tx)] : ""))
+    const row = r.termCells[i]
+    setText(row.name, n.name)
+    setText(row.code, cc(n))
+    row.code.hidden = !cc(n)
+    row.cpu.el.classList.toggle("off", !m)
+    row.cpu.el.firstChild.hidden = !m
+    setText(row.cpu.v, m ? pct(m.cpu) : n.online ? "waiting" : "offline")
+    for (const [c, t] of [[row.mem, m ? pct(ratio(m.mem_used, m.mem_total), 0) : ""], [row.rx, m ? rateShort(m.net_rx) : ""], [row.tx, m ? rateShort(m.net_tx) : ""]]) {
+      c.el.firstChild.hidden = !m
+      setText(c.v, t)
+    }
   })
   setText(r.termNote, `# live · ${state.updatedAt ? clock(state.updatedAt) : "--:--:--"} · every 2s`)
 }
@@ -746,12 +774,17 @@ function setMeter(m, p, text) {
   setText(m.v, text ?? (p == null ? "—" : pct(p, 0)))
 }
 
-/* ── latency on cards: the last hour of each probe, fetched only for cards on
-   screen, at most once a minute each and three at a time ── */
+/* ── latency: the last hour of each probe, fetched only for nodes on screen,
+   three requests at a time ── */
 
-// the hub writes probe results once a minute; checking twice a minute shows a
-// new minute within half a minute of it existing
-const PING_TTL = 30_000
+// The hub holds probe results in memory and files a minute's worth when the
+// first frame of the next minute arrives, a second or two past the boundary;
+// the history API serves only filed minutes. So a reading is stale once the
+// clock passes :03 of a new minute, and fetching then gets the minute just
+// filed. Should that minute still be missing, one retry follows 6 s later.
+const PING_PHASE = 3_000
+const minuteMark = (t) => Math.floor((t - PING_PHASE) / 60_000)
+const pingStale = (c, now) => !c || minuteMark(now) > minuteMark(c.at) || (c.retryAt && now >= c.retryAt)
 const pingCache = new Map()        // node id → { at, rows | null }
 const pingWatch = new Map()        // node id → re-render callback
 const pingQueue = []
@@ -774,7 +807,7 @@ function summarizePing(d) {
 
 function wantPing(id) {
   const c = pingCache.get(id)
-  if (c && Date.now() - c.at < PING_TTL) return
+  if (!pingStale(c, Date.now())) return
   if (pingQueue.includes(id) || c?.loading) return
   pingQueue.push(id)
   pumpPing()
@@ -787,8 +820,17 @@ function pumpPing() {
     const prev = pingCache.get(id)
     pingCache.set(id, { ...(prev || {}), loading: true, at: prev?.at ?? 0 })
     api(`/nodes/${encodeURIComponent(id)}/metrics?hours=1&points=60&series=ping`)
-      .then((d) => pingCache.set(id, { at: Date.now(), rows: summarizePing(d) }))
-      // keep what was shown; try again after the TTL
+      .then((d) => {
+        const now = Date.now()
+        // newest minute in the answer against the minute that should be filed by now
+        let newest = 0
+        for (const p of Array.isArray(d?.ping) ? d.ping : []) if (isNum(p?.ts) && p.ts > newest) newest = p.ts
+        const due = (Math.floor(now / 60_000) - 1) * 60
+        const retried = prev?.retried === minuteMark(now)
+        const retryAt = newest && newest < due && !retried ? now + 6_000 : 0
+        pingCache.set(id, { at: now, rows: summarizePing(d), retryAt, retried: retryAt ? minuteMark(now) : prev?.retried })
+      })
+      // keep what was shown; the next minute tries again
       .catch(() => pingCache.set(id, { at: Date.now(), rows: prev?.rows ?? null }))
       .finally(() => { pingActive--; pingWatch.get(id)?.(); pumpPing() })
   }
@@ -798,7 +840,7 @@ const seenObserver = typeof IntersectionObserver === "function"
   ? new IntersectionObserver((entries) => {
     for (const e of entries) {
       const id = e.target.__nodeId
-      if (e.isIntersecting) { onScreen.add(id); if (e.target.__wantsPing?.()) wantPing(id) }
+      if (e.isIntersecting) { onScreen.add(id); e.target.__show?.(); if (e.target.__wantsPing?.()) wantPing(id) }
       else onScreen.delete(id)
     }
   }, { rootMargin: "200px 0px" })
@@ -870,12 +912,21 @@ function sparkline(vals, { w = 64, h = 18, motion = null } = {}) {
     if (v == null) svg.append(s("path", { class: "miss", d: `M${X(i).toFixed(2)},${h - 3}V${h}` }))
   })
   const last = sm[N - 1]
-  if (last != null) {
-    const at = `M${X(N - 1).toFixed(2)},${Y(last).toFixed(2)}l0,0`
-    svg.append(s("path", { class: "halo", d: at }), s("path", { class: "dot", d: at }))
-  }
   if (animated) setTimeout(() => svg.classList.remove(motion), 1800)
-  return svg
+  // The ring around the latest reading is an HTML element over the line, scaled
+  // and faded: the compositor animates that without repainting the chart.
+  // (`h` is the height here, so the elements are made by hand)
+  const wrap = document.createElement("span")
+  wrap.className = "spark-w"
+  wrap.append(svg)
+  if (last != null) {
+    svg.append(s("path", { class: "dot", d: `M${X(N - 1).toFixed(2)},${Y(last).toFixed(2)}l0,0` }))
+    const ring = document.createElement("i")
+    ring.className = "halo"
+    ring.style.top = `${((Y(last) / h) * 100).toFixed(1)}%`
+    wrap.append(ring)
+  }
+  return wrap
 }
 
 /** The spec checklist under a card, shown when the operator turns it on. */
@@ -952,7 +1003,7 @@ function makeCard(node) {
       const lossCls = r.loss == null ? "loss" : r.loss >= 5 ? "loss bad" : r.loss >= 1 ? "loss warn" : "loss"
       ref.lat.append(h("div", { class: "lat-row" },
         h("span", { class: "nm", text: r.name }),
-        sparkline(r.vals, { motion: drawn ? "shift" : "draw" }),
+        sparkline(r.vals, { w: 160, h: 18, motion: drawn ? "shift" : "draw" }),
         h("span", { class: "ms", text: r.last == null ? "超时" : `${Math.round(r.last)} ms` }),
         h("span", { class: lossCls, title: "最近 1 小时丢包率",
           text: r.loss == null ? "" : r.loss === 0 ? "0%" : r.loss < 1 ? "<1%" : `${Math.round(r.loss)}%` })))

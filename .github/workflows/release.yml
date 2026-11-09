@@ -37,6 +37,8 @@ jobs:
           V=v$(node -p 'require("./theme.json").version')
           [ "$TAG" = "$V" ] || { echo "::error::tag $TAG, theme.json $V"; exit 1; }
 
+      # minifier for the build; pinned, and nothing else is installed
+      - run: npm install --no-save --no-package-lock esbuild@0.28.2
       - run: sh tools/pack.sh
       - run: sha256sum theme.tar.gz | cut -d' ' -f1 | tee theme.tar.gz.sha256
 

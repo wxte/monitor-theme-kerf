@@ -4,3 +4,4 @@ node_modules/
 .DS_Store
 tools/__pycache__/
 dist/
+tools/brotli_shim/__pycache__/

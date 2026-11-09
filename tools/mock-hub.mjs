@@ -5,6 +5,7 @@
 //   node tools/mock-hub.mjs [port]          then open http://127.0.0.1:9911
 //   MOCK_CLOSED=1  → public page closed (401s)
 //   MOCK_NOWS=1    → refuse WebSocket (tests the polling fallback)
+//   MOCK_NODES=480 → that many nodes
 //   MONITOR_HUB=https://hub.example.com → real data: /api and the push are
 //                  forwarded to that hub (its public status page must be open)
 import http from "node:http"
@@ -17,7 +18,8 @@ import { extname, join, normalize } from "node:path"
 import { build } from "./build.mjs"
 
 const PORT = Number(process.argv[2] || 9911)
-const DIST = new URL("../dist/", import.meta.url).pathname
+// MOCK_DIST=/path/to/dist serves an already-built theme as is (no build)
+const DIST = process.env.MOCK_DIST ? process.env.MOCK_DIST.replace(/\/?$/, "/") : new URL("../dist/", import.meta.url).pathname
 const CLOSED = !!process.env.MOCK_CLOSED
 const HUB = process.env.MONITOR_HUB ? new URL(process.env.MONITOR_HUB) : null
 const GiB = 1024 ** 3, MiB = 1024 ** 2, TiB = 1024 ** 4
@@ -34,6 +36,9 @@ const spec = [
   ["Seoul", "KR", "亚太", "", 3000, "JPY", "monthly", 2, 2, 40, 1 * TiB, 12],
 ]
 const start = Date.now() / 1000
+// MOCK_NODES=480 → a fleet that size, for testing long lists
+const want = Number(process.env.MOCK_NODES) || spec.length
+while (spec.length < want) { const b = spec[spec.length % 9]; spec.push([`${b[0]}-${spec.length}`, ...b.slice(1)]) }
 const nodes = spec.map(([name, country, group, remark, price, currency, cycle, cores, mem, disk, limit, exp], i) => ({
   id: i + 1, name, sort: i, public: true, online: i !== 5 && i !== 3, country, group,
   public_remark: remark, last_seen: start - (i === 5 ? 3 * 3600 : i === 3 ? 400 : 2),
@@ -108,7 +113,7 @@ const json = (res, body, status = 200) => { res.writeHead(status, { "content-typ
 const text = (res, body, status) => { res.writeHead(status, { "content-type": "text/plain; charset=utf-8" }); res.end(body) }
 
 // dist/ is generated: build now, and again on every page load so edits in src/ show on reload
-build()
+if (!process.env.MOCK_DIST) await build()
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://x")
   const p = url.pathname
@@ -134,7 +139,7 @@ const server = http.createServer(async (req, res) => {
   }
   // the real hub serves its built-in admin here, never the theme
   if (p === "/admin" || p.startsWith("/admin/")) return text(res, "（模拟 hub）这里是 hub 内置的后台", 200)
-  if (!/\.[a-z0-9]+$/i.test(p) || p.endsWith(".html")) { try { build({ quiet: true }) } catch (e) { console.error(e.message) } }
+  if (!process.env.MOCK_DIST && (!/\.[a-z0-9]+$/i.test(p) || p.endsWith(".html"))) { try { await build({ quiet: true }) } catch (e) { console.error(e.message) } }
   let file = normalize(join(DIST, decodeURIComponent(p)))
   if (!file.startsWith(DIST)) return text(res, "forbidden", 403)
   try {

@@ -15,6 +15,10 @@ Method (raster round trip, no boolean-geometry library needed):
 Usage: python3 build_kerf.py <Lexend[wght].ttf> <out-dir> [weight]
 """
 import sys, os, math
+try:
+    import brotli  # noqa: F401  (WOFF2 output)
+except ImportError:
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "brotli_shim"))
 import numpy as np
 import cv2
 from PIL import Image, ImageDraw, ImageFont
@@ -444,7 +448,7 @@ tmp = os.path.join(OUT, "_kerf.ttf")
 font.save(tmp)
 
 opts = subset.Options()
-opts.flavor = "woff"
+opts.flavor = "woff2"
 opts.layout_features = ["kern", "liga", "calt", "tnum", "case"]
 opts.hinting = False
 opts.name_IDs = ["*"]
@@ -452,10 +456,10 @@ f2 = TTFont(tmp)
 s = subset.Subsetter(opts)
 s.populate(text=CHARS)
 s.subset(f2)
-f2.flavor = "woff"
-f2.save(os.path.join(OUT, "kerf.woff"))
+f2.flavor = "woff2"
+f2.save(os.path.join(OUT, "kerf.woff2"))
 f2.flavor = None
 f2.save(os.path.join(OUT, "kerf.ttf"))
 os.remove(tmp)
 os.remove(static_path)
-print("glyphs", done, "->", os.path.getsize(os.path.join(OUT, "kerf.woff")), "bytes")
+print("glyphs", done, "->", os.path.getsize(os.path.join(OUT, "kerf.woff2")), "bytes")

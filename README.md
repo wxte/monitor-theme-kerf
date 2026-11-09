@@ -4,7 +4,7 @@
 
 ![预览](preview.png)
 
-- 纯静态单页，零依赖：原生 JS + CSS，构建只需 Node.js，整包约 180 KB
+- 纯静态单页，零依赖：原生 JS + CSS，构建只需 Node.js；首屏需要的脚本、样式和两套字体合计约 90 KB（hub 再 gzip）
 - 三套字体随包自带，不请求任何外部 CDN，国内访问不受影响
 - 深浅色跟随系统，访客可手动切换（只存在访客自己的浏览器里）
 - 以手机为主设计：触控尺寸、安全区、浏览器地址栏配色都照顾到了，平板和桌面同样适配
@@ -28,7 +28,7 @@
 | `/` | 首页：概览、终端报告、节点列表 |
 | `/node/{id}` | 节点详情：实时指标、历史曲线、延迟、节点信息 |
 
-hub 前面如果有按路径放行的反代或 WAF，要放行 `/node/` 前缀，以及 `/fonts/`、`/assets/`、`/favicon.svg`、`/apple-touch-icon.png`。症状是「点进节点正常，一刷新就被拦」。
+hub 前面如果有按路径放行的反代或 WAF，要放行 `/node/` 前缀，以及 `/assets/`、`/favicon.svg`、`/apple-touch-icon.png`。症状是「点进节点正常，一刷新就被拦」。
 
 ## 主题设置
 
@@ -43,7 +43,7 @@ hub 前面如果有按路径放行的反代或 WAF，要放行 `/node/` 前缀�
 | 终端报告行数 | 5 | 1–20 |
 | 节点布局 | 卡片 | 卡片 / 列表。列表每行左边是节点名和 CPU、内存、磁盘，中间是前三条延迟线路各一条最近 1 小时的平滑折线和「当前延迟·丢包率」，右边上下两行是下行、上行速率 |
 | 显示价格 | 开 | 有价格的节点在卡片上显示价格和付款周期 |
-| 显示延迟 | 开 | 卡片上显示各延迟线路最近 1 小时的折线、当前延迟和丢包率；列表布局显示前三条线路的折线和当前延迟。只请求屏幕上看得到的在线节点，每 30 秒一次，最多同时 3 个请求。hub 每分钟写入一次延迟数据，推送里不含延迟，所以做不到网速那样 2 秒一跳 |
+| 显示延迟 | 开 | 卡片上显示各延迟线路最近 1 小时的折线、当前延迟和丢包率；列表布局显示前三条线路的折线和当前延迟。只请求屏幕上看得到的在线节点，最多同时 3 个请求。hub 在每分钟开头一两秒把上一分钟的探测结果写入数据库，推送里不含延迟，所以主题在每分钟第 3 秒去取，没取到就 6 秒后再试一次 |
 | 国家显示 | 文字 | 文字代码（JP）/ 彩色国旗 / 灰色国旗 |
 | 显示规格清单 | 关 | 卡片底部的 ✓ 清单：CPU 型号、内存、磁盘、网速、系统、运行时间、到期日（节点详情里都有） |
 | 到期提醒 | 开 | 7 天内到期或已过期时在卡片价格下方提示，到期日期在节点详情里 |
@@ -59,13 +59,13 @@ hub 前面如果有按路径放行的反代或 WAF，要放行 `/node/` 前缀�
 
 国旗来自 [flag-icons](https://github.com/lipis/flag-icons)（MIT），转成了 48×36 的小 PNG：灰度的在 `static/flags/`，彩色的在 `static/flags-color/`，许可证随附。
 
-三套字体都是 SIL Open Font License 1.1，许可证随字体放在 `static/fonts/`。Kerf 是 Lexend 的修改版，按 OFL 要求改了名字。中文回落到系统字体：标题用细体（苹方 Light、微软雅黑 Light 等），和极细的英文笔画相称。
+三套字体都是 SIL Open Font License 1.1，许可证在 `static/fonts/`，发布包里在 `dist/licenses/`。字体是 WOFF2 格式，`tools/woff2.py` 负责转换（机器上没有 Python 的 brotli 模块时，借用 Node 自带的 brotli）。Kerf 是 Lexend 的修改版，按 OFL 要求改了名字。中文回落到系统字体：标题用细体（苹方 Light、微软雅黑 Light 等），和极细的英文笔画相称。
 
 字体只保留了拉丁字符的子集，所以很小。重新生成 Kerf：
 
 ```sh
 pip install fonttools numpy scipy scikit-image opencv-python pillow
-python3 tools/build_kerf.py "path/to/Lexend[wght].ttf" static/fonts 200
+python3 tools/build_kerf.py "path/to/Lexend[wght].ttf" static/fonts 165
 ```
 
 最后一个参数是字重（100–900），越小越细。
@@ -81,7 +81,7 @@ tools/      构建、打包、模拟 hub、字体生成
 dist/       构建产物（不进仓库）
 ```
 
-`node tools/build.mjs` 生成 `dist/`：把 `theme.json` 里的设置默认值写进脚本，并给每个资源文件名加上内容指纹（`app.3f9a1c2b.js`、`kerf.woff?v=…`）。主题更新后访客下次打开页面就拿到新文件，不会被浏览器缓存卡住。
+`node tools/build.mjs` 生成 `dist/`：把 `theme.json` 里的设置默认值写进脚本；脚本、样式、字体、国旗全部放进 `assets/` 并在文件名里带上内容指纹。hub 对 `assets/` 下的文件设一年缓存且不再询问，其它路径每次都要重新确认，所以这样既能长期缓存，主题更新后访客下次打开也会拿到新文件。装了 esbuild（`npm i esbuild`）时会顺便压缩 JS 和 CSS，没装也能构建，只是体积大一些。
 
 ```sh
 # 模拟 hub：假数据，带 WebSocket gzip 推送；启动和每次刷新页面时自动构建
@@ -93,7 +93,18 @@ MONITOR_HUB=https://hub.example.com node tools/mock-hub.mjs
 # 其它情形
 MOCK_CLOSED=1 node tools/mock-hub.mjs   # 公开页关闭（401）
 MOCK_NOWS=1 node tools/mock-hub.mjs     # WebSocket 被拒，测试轮询兜底
+MOCK_NODES=480 node tools/mock-hub.mjs  # 造 480 个节点，测长列表性能
 ```
+
+## 性能
+
+- 资源全部带指纹放在 `assets/`，走 hub 的一年缓存；再次打开只需重新确认 `index.html`
+- 字体 WOFF2 并预加载，回退字体按真实字宽校准，字体换入时版面不跳
+- 节点数据、站点信息和主题设置在页面开头就预取，和脚本下载并行
+- 屏幕外的行和卡片不排版、不绘制（`content-visibility`），也不做每 2 秒的更新，滚到时再补上最新数据
+- 只移动顺序变了的元素，推送不会让动画重播
+- 常驻动效（在线点、延迟光圈）只用 transform 和 opacity，由 GPU 合成；光圈只在新数据到来后播三次
+- 480 个节点、手机 4 倍降速下，每 2 秒推送的主线程占用约 10%
 
 ## 发布
 

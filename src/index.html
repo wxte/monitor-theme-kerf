@@ -10,8 +10,12 @@
     <link rel="icon" href="/favicon.svg" />
     <!-- fixed path, not hashed: the hub swaps it when the operator uploads an icon -->
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <link rel="preload" href="/fonts/kerf.woff" as="font" type="font/woff" crossorigin />
-    <link rel="preload" href="/fonts/space-grotesk.woff" as="font" type="font/woff" crossorigin />
+    <link rel="preload" href="/fonts/kerf.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/space-grotesk.woff2" as="font" type="font/woff2" crossorigin />
+    <!-- the data, requested alongside the script rather than after it runs -->
+    <link rel="preload" href="/api/me" as="fetch" crossorigin />
+    <link rel="preload" href="/api/themes/__SHORT__/config" as="fetch" crossorigin />
+    <link rel="preload" href="/api/nodes" as="fetch" crossorigin fetchpriority="low" />
     <title>Monitor</title>
     <script>
       // the visitor's own light/dark choice, applied before first paint
