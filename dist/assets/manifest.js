@@ -74,7 +74,14 @@ export const manifest = {
       "type": "boolean",
       "label": "显示延迟",
       "default": true,
-      "help": "卡片上显示各延迟线路最近 1 小时的延迟和丢包率；只请求屏幕上看得到的卡片，每分钟一次"
+      "help": "卡片显示各延迟线路最近 1 小时的延迟和丢包率，列表显示第一条线路；只请求屏幕上看得到的节点，每分钟一次"
+    },
+    {
+      "key": "show_specs",
+      "type": "boolean",
+      "label": "显示规格清单",
+      "default": false,
+      "help": "卡片底部列出 CPU 型号、内存、磁盘、网速、系统、运行时间、到期日，这些在节点详情里也有"
     },
     {
       "key": "show_expiry",

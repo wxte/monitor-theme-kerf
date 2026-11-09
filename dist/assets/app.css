@@ -356,6 +356,12 @@ section[id], header[id] { scroll-margin-top: 80px; }
 .lat-row .loss.bad { color: var(--bad); }
 .lat-more { font-size: 12px; color: var(--mute); }
 
+.feats { list-style: none; display: flex; flex-direction: column; gap: 10px; border-top: 1px solid var(--hairline); padding-top: 16px; }
+.feats li { display: flex; gap: 10px; font-size: 14px; line-height: 20px; color: var(--charcoal); min-width: 0; }
+.feats li::before { content: "✓"; color: var(--ink); flex: none; font-family: var(--font-mono); }
+.feats li span { min-width: 0; overflow-wrap: anywhere; }
+.feats li .dim { color: var(--mute); }
+
 /* list layout: FAQ-row treatment */
 .rows { border-top: 1px solid var(--hairline); }
 .row {

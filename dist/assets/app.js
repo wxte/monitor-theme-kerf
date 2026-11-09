@@ -679,6 +679,26 @@ function sparkline(vals) {
   return svg
 }
 
+/** The spec checklist under a card, shown when the operator turns it on. */
+function feats(n) {
+  const out = []
+  const m = n.online ? n.metrics : null
+  const memTotal = n.mem_total || m?.mem_total
+  const diskTotal = n.disk_total || m?.disk_total
+  if (n.cpu_cores > 0) out.push([`${n.cpu_cores} vCPU`, n.cpu_name ? ` (${cpuName(n.cpu_name)})` : ""])
+  if (memTotal > 0) out.push([`${size(memTotal)} 内存`, diskTotal > 0 ? ` · ${size(diskTotal)} 磁盘` : ""])
+  if (m) out.push([`↓ ${rate(m.net_rx)}`, `  ↑ ${rate(m.net_tx)}`])
+  const used = monthUsed(n)
+  if (n.traffic_limit > 0) out.push([`本期 ${bytes(used)}`, ` / ${size(n.traffic_limit)}`])
+  else if (used > 0) out.push([`本期 ${bytes(used)}`, " / ∞"])
+  const os = [osName(n.os), n.arch, n.virt].filter(Boolean)
+  if (os.length) out.push([os[0], os.length > 1 ? ` · ${os.slice(1).join(" · ")}` : ""])
+  if (m) out.push([`运行 ${uptime(m.uptime)}`, ` · 负载 ${m.load.map((x) => x.toFixed(2)).join(" ")}`])
+  const t = expiryText(expiryDays(n))
+  if (t) out.push([t, ""])
+  return out
+}
+
 function makeCard(node) {
   const ref = {}
   ref.dot = h("i", { class: "dot" })
@@ -694,13 +714,14 @@ function makeCard(node) {
   ref.traffic = meterRow("流量")
   ref.meters = h("div", { class: "meters" }, ref.cpu.el, ref.mem.el, ref.disk.el, ref.traffic.el)
   ref.lat = h("div", { class: "lat", hidden: true })
+  ref.feats = h("ul", { class: "feats", hidden: true })
   ref.link = h("a", { class: "btn btn-primary btn-block", href: `/node/${encodeURIComponent(node.id)}`, "data-route": true, text: "查看详情" })
   const el = h("article", { class: "card", tabindex: -1 },
     h("div", { class: "card-head" },
       h("div", { class: "t" }, h("div", { class: "card-name" }, ref.dot, ref.name), ref.desc),
       ref.cc),
     h("div", null, h("div", { class: "big" }, ref.num, ref.unit), ref.note),
-    ref.link, ref.meters, ref.lat)
+    ref.link, ref.meters, ref.lat, ref.feats)
   el.addEventListener("click", (e) => {
     if (e.target.closest("a") || getSelection()?.toString()) return
     go(`/node/${encodeURIComponent(node.id)}`)
@@ -714,6 +735,7 @@ function makeCard(node) {
   if (!seenObserver) onScreen.add(node.id)
 
   let latKey = ""
+  let featsKey = ""
   const drawLat = () => {
     const rows = wants() ? pingCache.get(cur.id)?.rows : null
     const key = rows ? JSON.stringify(rows.map((r) => [r.name, r.last, r.loss, r.vals.length, r.vals[r.vals.length - 1]])) : "none"
@@ -790,6 +812,17 @@ function makeCard(node) {
 
       if (wants() && onScreen.has(n.id)) wantPing(n.id)
       drawLat()
+
+      ref.feats.hidden = !c.show_specs
+      if (c.show_specs) {
+        const items = feats(n)
+        const key = JSON.stringify(items)
+        if (key !== featsKey) {
+          featsKey = key
+          clear(ref.feats)
+          for (const [a, b] of items) ref.feats.append(h("li", null, h("span", null, a, b ? h("span", { class: "dim", text: b }) : null)))
+        }
+      }
     },
   }
 }
@@ -798,6 +831,7 @@ function makeCard(node) {
 
 function makeRow(node) {
   const ref = {}
+  let cur = node
   ref.dot = h("i", { class: "dot" })
   ref.name = h("span")
   ref.cc = h("em")
@@ -806,26 +840,42 @@ function makeRow(node) {
   const el = h("a", { class: "row", href: `/node/${encodeURIComponent(node.id)}`, "data-route": true },
     h("div", { style: { minWidth: 0 } }, h("div", { class: "nm" }, ref.dot, ref.name, ref.cc), ref.sub),
     ref.met, h("span", { class: "go", "aria-hidden": true, text: "→" }))
+  const wants = () => state.config.show_latency && cur.online
+  el.__nodeId = node.id
+  el.__wantsPing = wants
+  seenObserver?.observe(el)
+  if (!seenObserver) onScreen.add(node.id)
+  const draw = () => {
+    const m = cur.online ? cur.metrics : null
+    clear(ref.met)
+    if (m) {
+      const p = wants() ? pingCache.get(cur.id)?.rows?.[0] : null
+      append(ref.met, [
+        p ? h("span", { title: p.name }, "延迟 ", h("b", { text: p.last == null ? "超时" : `${Math.round(p.last)}ms` }),
+          p.loss >= 1 ? h("span", { style: { color: p.loss >= 5 ? "var(--bad)" : "var(--warn)" }, text: ` 丢${Math.round(p.loss)}%` }) : null) : null,
+        h("span", { class: p ? "wide" : null }, "cpu ", h("b", { text: pct(m.cpu, 0) })),
+        h("span", { class: "wide" }, "mem ", h("b", { text: pct(ratio(m.mem_used, m.mem_total), 0) })),
+        h("span", null, "↓ ", h("b", { text: rateShort(m.net_rx) })),
+        h("span", { class: "wide" }, "↑ ", h("b", { text: rateShort(m.net_tx) }))])
+    } else {
+      const ago = sinceSeen(cur)
+      ref.met.append(h("span", { style: { color: cur.online ? "var(--warn)" : "var(--bad)" },
+        text: cur.online ? "等待上报" : ago == null ? "从未上报" : `离线 ${uptime(ago)}` }))
+    }
+  }
+  pingWatch.set(node.id, draw)
   return {
     el,
+    destroy() { seenObserver?.unobserve(el); onScreen.delete(node.id); pingWatch.delete(node.id) },
     update(n) {
+      cur = n
       const m = n.online ? n.metrics : null
       ref.dot.className = `dot ${n.online ? (m ? "on" : "wait") : "off"}`
       setText(ref.name, n.name)
       setText(ref.cc, cc(n))
       setText(ref.sub, n.public_remark || [osName(n.os), n.arch].filter(Boolean).join(" · "))
-      clear(ref.met)
-      if (m) {
-        ref.met.append(
-          h("span", null, "cpu ", h("b", { text: pct(m.cpu, 0) })),
-          h("span", { class: "wide" }, "mem ", h("b", { text: pct(ratio(m.mem_used, m.mem_total), 0) })),
-          h("span", null, "↓ ", h("b", { text: rateShort(m.net_rx) })),
-          h("span", { class: "wide" }, "↑ ", h("b", { text: rateShort(m.net_tx) })))
-      } else {
-        const ago = sinceSeen(n)
-        ref.met.append(h("span", { style: { color: n.online ? "var(--warn)" : "var(--bad)" },
-          text: n.online ? "等待上报" : ago == null ? "从未上报" : `离线 ${uptime(ago)}` }))
-      }
+      if (wants() && onScreen.has(n.id)) wantPing(n.id)
+      draw()
     },
   }
 }
