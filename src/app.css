@@ -352,7 +352,7 @@ section[id], header[id] { scroll-margin-top: 80px; }
 .card-cc { flex: none; height: 26px; display: flex; align-items: center; }
 
 /* grey flags: taken out of colour so they sit in the palette, framed so white flags still show */
-.flag { display: block; width: 16px; height: 12px; border-radius: 2px; flex: none; box-shadow: 0 0 0 1px var(--hairline); }
+.flag { display: block; width: 16px; height: 12px; border-radius: 2px; flex: none; box-shadow: 0 0 0 1px color-mix(in srgb, var(--ink) 14%, transparent); }
 .flag.grey { opacity: .85; filter: contrast(.9); }
 :root[data-theme="dark"] .flag.grey { opacity: .7; filter: contrast(.9) brightness(1.15); box-shadow: 0 0 0 1px var(--hairline-strong); }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .flag.grey { opacity: .7; filter: contrast(.9) brightness(1.15); box-shadow: 0 0 0 1px var(--hairline-strong); } }
@@ -413,7 +413,7 @@ section[id], header[id] { scroll-margin-top: 80px; }
 .row .who { min-width: 0; }
 .row .nm { display: flex; align-items: center; gap: 10px; color: var(--ink); font-weight: 500; font-size: 17px; line-height: 24px; min-width: 0; }
 .row .nm span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.row .nm .cc { flex: none; display: flex; align-items: center; }
+.row .nm .cc { flex: none; display: flex; align-items: center; overflow: visible; }   /* the flag's frame is a shadow */
 /* the row is paint-contained (content-visibility), so the dot's halo and its
    breathing ring need room inside it */
 .row .nm .dot { margin-left: 5px; }
