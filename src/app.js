@@ -222,6 +222,12 @@ const OS_ICONS = [
   [/deepin/, "deepin"], [/void/, "voidlinux"], [/android/, "android"], [/freebsd/, "freebsd"],
   [/darwin|mac ?os|os x/, "apple"], [/windows/, "windows"], [/linux|gnu/, "linux"],
 ]
+// The space left after a row's name and flag, as its layout settles: too little
+// for the icon there, and the row shows it at the end of its second line instead.
+const osRoom = typeof ResizeObserver === "function"
+  ? new ResizeObserver((list) => { for (const e of list) e.target.__row?.classList.toggle("os-low", e.contentRect.width < 14) })
+  : null
+
 function osIcon(os) {
   const t = String(os || "").toLowerCase()
   if (!t) return null
@@ -1107,8 +1113,12 @@ function makeRow(node) {
   ref.dot = h("i", { class: "dot" })
   ref.name = h("span")
   ref.cc = h("span", { class: "cc" })
-  ref.osn = h("span", { class: "osn" })     // the system's icon, where the row has no column for it
-  ref.sub = h("div", { class: "sub" })
+  // the system's icon, where the row has no column for it: after the flag when
+  // the name leaves room, otherwise at the end of the second line
+  ref.osn = h("span", { class: "osn" })
+  ref.oss = h("span", { class: "oss" })
+  ref.subt = h("span", { class: "subt" })
+  ref.sub = h("div", { class: "sub" }, ref.subt, ref.oss)
   ref.lat = h("div", { class: "lanes" })
   ref.rx = h("span")
   ref.tx = h("span")
@@ -1119,6 +1129,8 @@ function makeRow(node) {
     ref.os, ref.lat, ref.net, h("span", { class: "go", "aria-hidden": true, text: "→" }))
 
   const wants = () => state.config.show_latency && cur.online
+  ref.osn.__row = el
+  osRoom?.observe(ref.osn)
   el.__nodeId = node.id
   el.__wantsPing = wants
   seenObserver?.observe(el)
@@ -1159,7 +1171,7 @@ function makeRow(node) {
   let subKey = "", osKey = null
   return {
     el,
-    destroy() { seenObserver?.unobserve(el); onScreen.delete(node.id); pingWatch.delete(node.id) },
+    destroy() { seenObserver?.unobserve(el); osRoom?.unobserve(ref.osn); onScreen.delete(node.id); pingWatch.delete(node.id) },
     update(n) {
       cur = n
       const ok = `${n.os}|${n.arch}|${n.virt}`
@@ -1172,6 +1184,7 @@ function makeRow(node) {
         ref.os.title = [osName(n.os), n.kernel].filter(Boolean).join(" · ")
         const icon = osIcon(n.os)
         ref.osn.replaceChildren(...(icon ? [icon] : []))
+        ref.oss.replaceChildren(...(icon ? [osIcon(n.os)] : []))
         ref.osn.title = ref.os.title
       }
       const m = n.online ? n.metrics : null
@@ -1194,8 +1207,8 @@ function makeRow(node) {
       const key = JSON.stringify(parts)
       if (key !== subKey) {
         subKey = key
-        clear(ref.sub)
-        parts.forEach(([cls, t], i) => append(ref.sub, [i ? h("span", { class: `sep ${cls === "wide" || cls === "remark" ? cls : ""}`, text: " · " }) : null, h("span", { class: cls || null, text: t })]))
+        clear(ref.subt)
+        parts.forEach(([cls, t], i) => append(ref.subt, [i ? h("span", { class: `sep ${cls === "wide" || cls === "remark" ? cls : ""}`, text: " · " }) : null, h("span", { class: cls || null, text: t })]))
       }
 
       ref.net.style.visibility = m ? "" : "hidden"    // keeps its column, so the arrow stays put

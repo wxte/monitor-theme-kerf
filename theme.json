@@ -2,7 +2,7 @@
   "name": "Kerf",
   "short": "kerf",
   "description": "黑白极简，细线断笔标题字，终端式实时报告",
-  "version": "1.8.1",
+  "version": "1.8.2",
   "author": "wxte",
   "url": "https://github.com/wxte/monitor-theme-kerf",
   "config": [
@@ -16,7 +16,7 @@
     {"type": "title", "label": "节点卡片"},
     {"key": "country_style", "type": "select", "label": "国家显示", "default": "text", "options": [{"value": "text", "label": "文字（JP）"}, {"value": "color", "label": "彩色国旗"}, {"value": "grey", "label": "灰色国旗"}]},
     {"key": "show_price", "type": "boolean", "label": "显示价格", "default": true},
-    {"key": "show_latency", "type": "boolean", "label": "显示延迟", "default": true, "help": "卡片和列表显示各线路最近 1 小时的延迟折线、当前延迟和丢包率；只请求屏幕上看得到的节点，每 30 秒一次"},
+    {"key": "show_latency", "type": "boolean", "label": "显示延迟", "default": true, "help": "卡片和列表显示各线路最近 1 小时的延迟折线、当前延迟和丢包率；只请求屏幕上看得到的节点，每分钟一次（hub 每分钟写入一次）"},
     {"key": "show_specs", "type": "boolean", "label": "显示规格清单", "default": false, "help": "卡片底部列出 CPU 型号、内存、磁盘、网速、系统、运行时间、到期日，这些在节点详情里也有"},
     {"key": "show_expiry", "type": "boolean", "label": "到期提醒", "default": true, "help": "7 天内到期或已过期时在卡片上提示，到期日期在节点详情里"},
     {"type": "title", "label": "页脚"},
