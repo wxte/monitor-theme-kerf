@@ -557,8 +557,6 @@ function renderHome() {
   r.list = h("div", { class: c.layout === "list" ? "rows" : "grid" })
   r.empty = h("div", { class: "empty", hidden: true, text: "这里还没有节点" })
   r.sectionLede = h("p", { class: "lede" })
-  r.closingTitle = h("h2", { class: "h2" })
-  r.closingLede = h("p", { class: "lede small mono" })
 
   shell.main.append(
     h("section", { class: "hero", id: "overview" },
@@ -574,9 +572,7 @@ function renderHome() {
         r.tabs,
         h("div", { class: "stats home", style: { marginBottom: "28px" } },
           stat("online", "在线节点"), stat("rx", "实时下行"), stat("tx", "实时上行"), stat("month", "本期流量")),
-        r.list, r.empty)),
-    h("section", { class: "closing wrap" },
-      r.closingTitle, r.closingLede))
+        r.list, r.empty)))
 
   updateHome()
   if (location.hash) document.getElementById(location.hash.slice(1))?.scrollIntoView()
@@ -715,11 +711,6 @@ function updateHome() {
   })
   for (const [id, item] of list) if (!seen.has(id)) { item.destroy?.(); item.el.remove(); list.delete(id) }
   r.empty.hidden = !state.nodes || nodes.length > 0
-
-  // closing band
-  setText(r.closingTitle, !state.nodes ? "正在连接。" : sum.total === 0 ? "还没有节点。"
-    : sum.offline === 0 ? "所有节点运行正常。" : `${sum.offline} 个节点离线。`)
-  setText(r.closingLede, state.updatedAt ? `# 最后更新 ${clock(state.updatedAt)} · 每 2 秒推送` : "# 等待第一帧数据")
 }
 
 function updateTerminal(r, nodes, sum, site) {
