@@ -4,7 +4,7 @@
 
 ![预览](preview.png)
 
-- 纯静态单页，零依赖、无需构建：原生 JS + CSS，整包约 180 KB
+- 纯静态单页，零依赖：原生 JS + CSS，构建只需 Node.js，整包约 180 KB
 - 三套字体随包自带，不请求任何外部 CDN，国内访问不受影响
 - 深浅色跟随系统，访客可手动切换（只存在访客自己的浏览器里）
 - 以手机为主设计：触控尺寸、安全区、浏览器地址栏配色都照顾到了，平板和桌面同样适配
@@ -41,7 +41,7 @@ hub 前面如果有按路径放行的反代或 WAF，要放行 `/node/` 前缀�
 | 显示终端报告 | 开 | 首页按实时流量排序的终端式报告 |
 | 终端报告行数 | 5 | 1–20 |
 | 节点布局 | 卡片 | 卡片 / 列表 |
-| 显示价格 | 开 | 有价格的节点在卡片上以价格为主数字，否则显示 CPU |
+| 显示价格 | 开 | 有价格的节点在卡片上显示价格和付款周期 |
 | 显示延迟 | 开 | 卡片上显示各延迟线路最近 1 小时的折线、当前延迟和丢包率，列表布局显示第一条线路。只请求屏幕上看得到的在线节点，每张卡每分钟一次，最多同时 3 个请求 |
 | 显示规格清单 | 关 | 卡片底部的 ✓ 清单：CPU 型号、内存、磁盘、网速、系统、运行时间、到期日（节点详情里都有） |
 | 到期提醒 | 开 | 7 天内到期或已过期时在卡片价格下方提示，到期日期在节点详情里 |
@@ -55,23 +55,32 @@ hub 前面如果有按路径放行的反代或 WAF，要放行 `/node/` 前缀�
 | Space Grotesk | 正文、数字 | [floriankarsten/space-grotesk](https://github.com/floriankarsten/space-grotesk) |
 | JetBrains Mono | 终端、等宽数字 | [JetBrains/JetBrainsMono](https://github.com/JetBrains/JetBrainsMono) |
 
-三者都是 SIL Open Font License 1.1，许可证随字体放在 `dist/fonts/`。Kerf 是 Lexend 的修改版，按 OFL 要求改了名字。中文回落到系统字体：标题用细体（苹方 Light、微软雅黑 Light 等），和极细的英文笔画相称。
+三者都是 SIL Open Font License 1.1，许可证随字体放在 `static/fonts/`。Kerf 是 Lexend 的修改版，按 OFL 要求改了名字。中文回落到系统字体：标题用细体（苹方 Light、微软雅黑 Light 等），和极细的英文笔画相称。
 
 字体只保留了拉丁字符的子集，所以很小。重新生成 Kerf：
 
 ```sh
 pip install fonttools numpy scipy scikit-image opencv-python pillow
-python3 tools/build_kerf.py "path/to/Lexend[wght].ttf" dist/fonts 200
+python3 tools/build_kerf.py "path/to/Lexend[wght].ttf" static/fonts 200
 ```
 
 最后一个参数是字重（100–900），越小越细。
 
 ## 开发
 
-不需要 npm。改的就是 `dist/` 里的文件。
+不需要 npm，只要 Node.js。
+
+```
+src/        页面源码：index.html、app.js、app.css
+static/     原样复制的文件：字体、图标
+tools/      构建、打包、模拟 hub、字体生成
+dist/       构建产物（不进仓库）
+```
+
+`node tools/build.mjs` 生成 `dist/`：把 `theme.json` 里的设置默认值写进脚本，并给每个资源文件名加上内容指纹（`app.3f9a1c2b.js`、`kerf.woff?v=…`）。主题更新后访客下次打开页面就拿到新文件，不会被浏览器缓存卡住。
 
 ```sh
-# 模拟 hub：假数据，带 WebSocket gzip 推送
+# 模拟 hub：假数据，带 WebSocket gzip 推送；启动和每次刷新页面时自动构建
 node tools/mock-hub.mjs           # 打开 http://127.0.0.1:9911
 
 # 接一个真实 hub 的数据（它要开着公开状态页）
@@ -81,8 +90,6 @@ MONITOR_HUB=https://hub.example.com node tools/mock-hub.mjs
 MOCK_CLOSED=1 node tools/mock-hub.mjs   # 公开页关闭（401）
 MOCK_NOWS=1 node tools/mock-hub.mjs     # WebSocket 被拒，测试轮询兜底
 ```
-
-`theme.json` 是设置项的唯一出处，`tools/build.mjs` 把它生成为 `dist/assets/manifest.js`，打包脚本会自动运行它。改了 `theme.json` 的设置后本地调试前手动跑一次：`node tools/build.mjs`。
 
 ## 发布
 

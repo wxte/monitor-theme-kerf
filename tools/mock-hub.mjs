@@ -14,6 +14,7 @@ import { readFile } from "node:fs/promises"
 import { createHash } from "node:crypto"
 import { gzipSync } from "node:zlib"
 import { extname, join, normalize } from "node:path"
+import { build } from "./build.mjs"
 
 const PORT = Number(process.argv[2] || 9911)
 const DIST = new URL("../dist/", import.meta.url).pathname
@@ -106,6 +107,8 @@ const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", "
 const json = (res, body, status = 200) => { res.writeHead(status, { "content-type": "application/json" }); res.end(JSON.stringify(body)) }
 const text = (res, body, status) => { res.writeHead(status, { "content-type": "text/plain; charset=utf-8" }); res.end(body) }
 
+// dist/ is generated: build now, and again on every page load so edits in src/ show on reload
+build()
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://x")
   const p = url.pathname
@@ -131,6 +134,7 @@ const server = http.createServer(async (req, res) => {
   }
   // the real hub serves its built-in admin here, never the theme
   if (p === "/admin" || p.startsWith("/admin/")) return text(res, "（模拟 hub）这里是 hub 内置的后台", 200)
+  if (!/\.[a-z0-9]+$/i.test(p) || p.endsWith(".html")) { try { build({ quiet: true }) } catch (e) { console.error(e.message) } }
   let file = normalize(join(DIST, decodeURIComponent(p)))
   if (!file.startsWith(DIST)) return text(res, "forbidden", 403)
   try {

@@ -749,7 +749,7 @@ function makeCard(node) {
     h("div", { class: "card-head" },
       h("div", { class: "t" }, h("div", { class: "card-name" }, ref.dot, ref.name), ref.desc),
       ref.cc),
-    h("div", null, h("div", { class: "big" }, ref.num, ref.unit), ref.note),
+    h("div", { class: "price" }, h("div", { class: "big", ref: (x) => (ref.big = x) }, ref.num, ref.unit), ref.note),
     ref.link, ref.meters, ref.lat, ref.feats)
   el.addEventListener("click", (e) => {
     if (e.target.closest("a") || getSelection()?.toString()) return
@@ -806,18 +806,12 @@ function makeCard(node) {
       setText(ref.cc, cc(n))
       el.classList.toggle("is-off", !n.online)
 
-      if (c.show_price && n.price > 0) {
+      // the big figure is the price; without one the meters below say it all
+      const priced = c.show_price && n.price > 0
+      ref.big.hidden = !priced
+      if (priced) {
         setText(ref.num, money(n.price, n.currency || "CNY"))
         setText(ref.unit, per(n.billing_cycle))
-        ref.num.classList.remove("off")
-      } else if (m) {
-        setText(ref.num, pct(m.cpu))
-        setText(ref.unit, "CPU")
-        ref.num.classList.remove("off")
-      } else {
-        setText(ref.num, n.online ? "等待上报" : "离线")
-        setText(ref.unit, "")
-        ref.num.classList.toggle("off", !n.online)
       }
 
       // one short status line under the price: offline time, a near or past expiry
@@ -831,6 +825,7 @@ function makeCard(node) {
       if (d != null && d <= 7) notes.push([d < 0 ? "bad" : "warn", expiryText(d)])
       notes.forEach(([cls, t], i) => append(ref.note, [i ? h("span", { class: "sep", text: " · " }) : null, h("span", { class: cls, text: t })]))
       ref.note.hidden = notes.length === 0
+      ref.big.parentElement.hidden = !priced && notes.length === 0
 
       for (const r of [ref.cpu, ref.mem, ref.disk]) r.el.hidden = !m
       if (m) {
