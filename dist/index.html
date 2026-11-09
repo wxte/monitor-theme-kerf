@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <link rel="icon" href="/favicon.svg" />
+    <!-- fixed path, not hashed: the hub swaps it when the operator uploads an icon -->
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="preload" href="/fonts/kerf.woff" as="font" type="font/woff" crossorigin />
+    <link rel="preload" href="/fonts/space-grotesk.woff" as="font" type="font/woff" crossorigin />
+    <title>Monitor</title>
+    <script>
+      // the visitor's own light/dark choice, applied before first paint
+      try {
+        var t = localStorage.getItem("kerf-theme")
+        if (t === "light" || t === "dark") document.documentElement.dataset.theme = t
+      } catch (e) {}
+    </script>
+    <link rel="stylesheet" href="/assets/app.css" />
+  </head>
+  <body>
+    <div id="app"><div class="loading">正在连接</div></div>
+    <script type="module" src="/assets/app.js"></script>
+  </body>
+</html>

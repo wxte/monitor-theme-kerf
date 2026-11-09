@@ -1,0 +1,43 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # The panel's one-click update compares the release tag with theme.json's
+      # version (v1.2.0 ↔ 1.2.0); a mismatch would reinstall on every check.
+      - if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          V=v$(node -p 'require("./theme.json").version')
+          [ "$GITHUB_REF_NAME" = "$V" ] || { echo "::error::tag $GITHUB_REF_NAME, theme.json $V"; exit 1; }
+
+      - run: sh tools/pack.sh
+      - run: sha256sum theme.tar.gz | cut -d' ' -f1 | tee theme.tar.gz.sha256
+
+      # The panel's "install from GitHub" only reads a file named exactly
+      # theme.tar.gz from the latest full release (not a prerelease or draft).
+      - if: startsWith(github.ref, 'refs/tags/')
+        run: gh release create "$GITHUB_REF_NAME" theme.tar.gz theme.tar.gz.sha256 --generate-notes --repo "$GITHUB_REPOSITORY"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: theme
+          path: theme.tar.gz
