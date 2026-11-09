@@ -3,8 +3,8 @@
   "short": "kerf",
   "description": "黑白极简，细线断笔标题字，终端式实时报告",
   "version": "1.0.0",
-  "author": "",
-  "url": "",
+  "author": "wxte",
+  "url": "https://github.com/wxte/monitor-theme-kerf",
   "config": [
     { "type": "title", "label": "首页" },
     { "key": "hero_title", "type": "string", "label": "大标题", "default": "", "help": "留空则显示站点名称" },

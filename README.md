@@ -13,7 +13,7 @@
 
 三种方式，任选其一（详见文档的[安装与切换](https://monitor-document.pages.dev/dev/theme#安装与切换)）：
 
-1. 面板 **主题** 页填本仓库地址，点「从 GitHub 安装」
+1. 面板 **主题** 页填 `https://github.com/wxte/monitor-theme-kerf`，点「从 GitHub 安装」
 2. 下载 [Releases](../../releases/latest) 里的 `theme.tar.gz`（不是 Source code），在 **主题** 页上传
 3. 解压到 hub 的主题目录：一键脚本部署是 `/opt/monitor/data/themes/kerf/`
 
@@ -83,9 +83,8 @@ MOCK_NOWS=1 node tools/mock-hub.mjs     # WebSocket 被拒，测试轮询兜底
 
 ## 发布
 
-1. 第一次发布前，把 `theme.json` 的 `url` 改成本仓库地址（如 `https://github.com/you/monitor-theme-kerf`），`author` 填上你的名字。面板的一键更新靠 `url` 找 release
-2. 改 `theme.json` 的 `version`，提交
-3. 打同名 tag 并推送：
+1. 改 `theme.json` 的 `version`，提交
+2. 打同名 tag 并推送：
 
 ```sh
 git tag v1.0.0 && git push origin v1.0.0
