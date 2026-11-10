@@ -475,8 +475,20 @@ section[id], header[id] { scroll-margin-top: 80px; }
   .row .sub .wide, .row .sub .remark { display: none; }
   .row .nm { font-size: 15px; line-height: 22px; gap: 6px; }
   .row .nm .osn { margin-left: 0; }
-  .row .sub { margin-left: 19px; }
+  .row .sub { margin-left: 19px; font-size: 12px; }
+  .row .sub .sep { letter-spacing: -.12em; }
   .row .net { font-size: 11.5px; min-width: 0; }
+}
+/* narrower phones: the load line has three figures to fit */
+@media (max-width: 400px) {
+  .row { grid-template-columns: minmax(0, 1fr) 112px 56px; gap: 5px; }
+  .lane { grid-template-columns: 20px minmax(0, 1fr) 50px; gap: 3px; }
+  .row .net { font-size: 11px; }
+  .row .sub { font-size: 11px; margin-left: 19px; }
+}
+@media (max-width: 380px) {
+  .row .sub { font-size: 10.5px; margin-left: 17px; }
+  .row .nm { gap: 4px; }
 }
 @media (max-width: 359px) {
   .row { grid-template-columns: minmax(0, 1fr) auto; }

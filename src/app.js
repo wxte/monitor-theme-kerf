@@ -1195,8 +1195,13 @@ function makeRow(node) {
       // second line: load when reporting, otherwise why it is not
       const parts = []
       if (m) {
-        parts.push(["", `CPU ${pct(m.cpu, 0)}`], ["", `内存 ${pct(ratio(m.mem_used, m.mem_total), 0)}`],
-          ["wide", `磁盘 ${pct(ratio(m.disk_used, m.disk_total), 0)}`])
+        parts.push(["", `CPU ${pct(m.cpu, 0)}`], ["", `内存 ${pct(ratio(m.mem_used, m.mem_total), 0)}`])
+        // share of the period's traffic allowance, for nodes that have one
+        if (n.traffic_limit > 0) {
+          const t = (monthUsed(n) / n.traffic_limit) * 100
+          parts.push([t >= 95 ? "bad" : t >= 80 ? "warn" : "", `流量 ${pct(t, 0)}`])
+        }
+        parts.push(["wide", `磁盘 ${pct(ratio(m.disk_used, m.disk_total), 0)}`])
       } else {
         const ago = sinceSeen(n)
         parts.push([n.online ? "warn" : "bad", n.online ? "已连接，等待首次上报" : ago == null ? "从未上报" : `离线 ${uptime(ago)}`])
