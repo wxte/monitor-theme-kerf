@@ -2062,11 +2062,25 @@ function timeLabel(ms, span) {
  * Lines break across nulls and across gaps wider than `gap` ms.
  */
 let chartIntro = false
+const chartSeen = typeof IntersectionObserver === "function"
+  ? new IntersectionObserver((list) => {
+    for (const e of list) {
+      if (!e.isIntersecting) continue
+      const el = e.target
+      chartSeen.unobserve(el)
+      el.classList.replace("pending", "draw")
+      setTimeout(() => el.classList.remove("draw"), 1300)   // a later redraw (resize) is not an entrance
+    }
+  }, { threshold: 0.35 })
+  : null
 function chart({ label, series, max, fmt, tipFmt, gap, tall, current }) {
   const svgEl = s("svg", { role: "img", "aria-label": label })
-  if (chartIntro && motionOK()) {
-    svgEl.classList.add("draw")
-    setTimeout(() => svgEl.classList.remove("draw"), 1300)   // a later redraw (resize) is not an entrance
+  // The lines wait, undrawn, until the chart is on screen: on a phone the
+  // charts start below the fold, and drawn at once they had finished before
+  // anyone scrolled down to them.
+  if (chartIntro && motionOK() && chartSeen) {
+    svgEl.classList.add("pending")
+    chartSeen.observe(svgEl)
   }
   const tip = h("div", { class: "tip", hidden: true })
   const cur = h("span", { class: "v" })

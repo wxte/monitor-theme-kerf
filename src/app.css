@@ -822,4 +822,5 @@ section[id], header[id] { scroll-margin-top: 80px; }
 /* ── node page charts: lines drawn in from the left, once per request ── */
 @media (prefers-reduced-motion: no-preference) {
   .chart svg.draw .series, .chart svg.draw .area { animation: wipe 1s cubic-bezier(.3, .7, .2, 1) both; }
+  .chart svg.pending .series, .chart svg.pending .area { clip-path: inset(0 100% 0 0); }
 }
