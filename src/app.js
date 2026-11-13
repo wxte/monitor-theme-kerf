@@ -1468,6 +1468,9 @@ function drawHistory() {
       pts: rows.map((p) => [t(p), num(p.disk_used) == null ? null : diskTotal ? (p.disk_used / diskTotal) * 100 : p.disk_used]) }] })
 }
 
+// probe ids whose line the visitor has switched off on the latency chart
+const hiddenProbes = new Set()
+
 function drawPing(d) {
   const r = detail
   const ping = Array.isArray(d.ping) ? d.ping.filter((p) => p && isNum(p.ts)) : []
@@ -1485,14 +1488,29 @@ function drawPing(d) {
       gap: medianStep(pts.map((p) => p[0] / 1000)) * 3 * 1000, loss: Number(loss[id]) || 0,
       avg: avg(pts.map((p) => p[1])) }
   })
-  const c = chart({ label: "延迟", tall: true, current: "", fmt: (v) => `${Math.round(v)} ms`, tipFmt: (v) => `${Math.round(v)} ms`, series })
-  r.chartBox.append(c.el)
-  r.charts.push(c)
-  r.chartBox.append(h("div", { class: "legend" },
-    series.map((x) => h("span", null,
-      h("i", { style: { background: x.color, opacity: x.dash ? ".6" : "1" } }),
-      x.name,
-      h("em", { text: `${x.avg == null ? "—" : Math.round(x.avg) + " ms"}${x.loss > 0 ? ` · 丢 ${x.loss < 1 ? "<1" : Math.round(x.loss)}%` : ""}` })))))
+  // Click a line's name to hide it; the scale then fits what is left. The
+  // choice is kept while the page is open, across ranges and refreshes.
+  const box = h("div")
+  r.chartBox.append(box)
+  let shown = null
+  const render = () => {
+    if (shown) r.charts.splice(r.charts.indexOf(shown), 1)
+    if (series.every((x) => hiddenProbes.has(x.id))) hiddenProbes.clear()
+    const visible = series.filter((x) => !hiddenProbes.has(x.id))
+    shown = chart({ label: "延迟", tall: true, current: "", fmt: (v) => `${Math.round(v)} ms`, tipFmt: (v) => `${Math.round(v)} ms`, series: visible })
+    r.charts.push(shown)
+    box.replaceChildren(shown.el, h("div", { class: "legend", role: "group", "aria-label": "显示的线路" },
+      series.map((x) => {
+        const off = hiddenProbes.has(x.id)
+        return h("button", { type: "button", class: off ? "off" : null, "aria-pressed": String(!off),
+          title: off ? "点击显示" : series.length > 1 ? "点击隐藏" : null,
+          on: { click: () => { off ? hiddenProbes.delete(x.id) : hiddenProbes.add(x.id); render() } } },
+          h("i", { style: { background: x.color, opacity: x.dash ? ".6" : "1" } }),
+          x.name,
+          h("em", { text: `${x.avg == null ? "—" : Math.round(x.avg) + " ms"}${x.loss > 0 ? ` · 丢 ${x.loss < 1 ? "<1" : Math.round(x.loss)}%` : ""}` }))
+      })))
+  }
+  render()
 }
 
 function medianStep(ts) {
