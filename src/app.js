@@ -1832,7 +1832,10 @@ async function loadHistory(quiet) {
     const data = await api(`/nodes/${encodeURIComponent(r.id)}/metrics?hours=${r.hours}&points=${points}&series=${r.tab}`)
     if (detail !== r || r.want !== want) return
     r.data = data || {}
+    // lines are drawn in when the visitor asked for them, not on the minute's refresh
+    chartIntro = !quiet
     drawHistory()
+    chartIntro = false
   } catch (e) {
     if (detail !== r || r.want !== want) return
     clear(r.chartBox)
@@ -2058,8 +2061,13 @@ function timeLabel(ms, span) {
  * A small SVG line chart. series: [{ name, color, dash?, area?, pts: [[ms, v|null]], gap? }]
  * Lines break across nulls and across gaps wider than `gap` ms.
  */
+let chartIntro = false
 function chart({ label, series, max, fmt, tipFmt, gap, tall, current }) {
   const svgEl = s("svg", { role: "img", "aria-label": label })
+  if (chartIntro && motionOK()) {
+    svgEl.classList.add("draw")
+    setTimeout(() => svgEl.classList.remove("draw"), 1300)   // a later redraw (resize) is not an entrance
+  }
   const tip = h("div", { class: "tip", hidden: true })
   const cur = h("span", { class: "v" })
   const el = h("div", { class: `chart${tall ? " tall" : ""}` },

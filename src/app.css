@@ -818,3 +818,8 @@ section[id], header[id] { scroll-margin-top: 80px; }
 .card.skel .w-price { width: 36%; height: 30px; margin-top: 8px; }
 .card.skel .w-btn { height: 40px; border-radius: 9999px; margin: 6px 0; }
 .card.skel .w-line { height: 10px; }
+
+/* ── node page charts: lines drawn in from the left, once per request ── */
+@media (prefers-reduced-motion: no-preference) {
+  .chart svg.draw .series, .chart svg.draw .area { animation: wipe 1s cubic-bezier(.3, .7, .2, 1) both; }
+}
