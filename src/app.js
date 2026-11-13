@@ -469,14 +469,19 @@ function go(path) {
  * `from` carries the shared name out of the old page, `into()` returns the
  * element that takes it in the new one.
  */
-let swapping = false     // a title that is flown in does not also fade in
+// True while a page is built inside a view transition. The transition is the
+// entrance: parts that also faded in on their own showed up a beat after the
+// rest, which read as a flicker.
+let swapping = false
+/** A class list, without its entrance animation when the page should arrive still. */
+const entry = (cls, still = swapping) => (still ? cls.replace(/\s*\breveal(-\d)?\b/g, "").trim() : cls)
 function swap(change, from, into) {
   if (!document.startViewTransition || !motionOK()) { change(); return }
   if (from) from.style.viewTransitionName = "node-title"
   let to = null
   const t = document.startViewTransition(() => {
     if (from) from.style.viewTransitionName = ""
-    swapping = !!from
+    swapping = true
     try { change() } finally { swapping = false }
     to = into?.() || null
     if (to) to.style.viewTransitionName = "node-title"
@@ -627,15 +632,16 @@ function renderHome() {
   clear(shell.main)
   const c = state.config
   const r = (home = { cards: new Map(), rows: new Map(), groupsKey: null, quiet: quietHome })
+  const still = swapping || quietHome
   quietHome = false
 
-  r.title = h("h1", { class: "display xl reveal" })
-  r.chip = h("div", { class: "chip reveal reveal-3" })
+  r.title = h("h1", { class: entry("display xl reveal", still) })
+  r.chip = h("div", { class: entry("chip reveal reveal-3", still) })
   r.notice = c.notice
-    ? h("div", { class: "notice reveal" }, h("span", { class: "tag", text: "公告" }), h("span", { class: "txt", text: c.notice }))
+    ? h("div", { class: entry("notice reveal", still) }, h("span", { class: "tag", text: "公告" }), h("span", { class: "txt", text: c.notice }))
     : null
 
-  r.map = c.show_map ? buildMap() : null
+  r.map = c.show_map ? buildMap(still) : null
 
   // terminal report
   r.termTitle = h("span")
@@ -658,7 +664,7 @@ function renderHome() {
     } } }, h("span", { class: "ps", "aria-hidden": true, text: "$" }), r.termIn)
     : null
   const term = c.show_terminal
-    ? h("div", { class: "wrap reveal reveal-4" },
+    ? h("div", { class: entry("wrap reveal reveal-4", still) },
       h("div", { class: "term narrow", "aria-label": "实时报告" },
         h("div", { class: "term-bar", "aria-hidden": true }, h("i"), h("i"), h("i"), r.termTitle),
         r.termCmd, r.termHost, r.termRows, prompt, r.termOut, r.termNote))
@@ -678,9 +684,9 @@ function renderHome() {
       h("div", { class: "wrap stack" },
         r.notice,
         r.title,
-        c.hero_subtitle ? h("p", { class: "lede reveal reveal-2", text: c.hero_subtitle }) : null,
+        c.hero_subtitle ? h("p", { class: entry("lede reveal reveal-2", still), text: c.hero_subtitle }) : null,
         r.chip)),
-    r.map ? h("div", { class: "wrap reveal reveal-3" }, r.map.el) : null,
+    r.map ? h("div", { class: entry("wrap reveal reveal-3", still) }, r.map.el) : null,
     term,
     h("section", { class: "section", id: "nodes" },
       h("div", { class: "wrap" },
@@ -910,7 +916,7 @@ const MAP_AT = (() => {
   }
   return at
 })()
-function buildMap() {
+function buildMap(still) {
   const { cols, rows, land } = MAP
   // every land cell is a zero-length stroke with round caps: one element, 900 dots
   let d = ""
@@ -935,7 +941,7 @@ function buildMap() {
       }
       const next = JSON.stringify([...by])
       if (next === key) return
-      const first = key === ""
+      const first = key === "" && !still
       key = next
       clear(marks)
       svgEl.setAttribute("aria-label", by.size ? `节点分布在 ${by.size} 个国家和地区` : "世界地图")
@@ -1476,9 +1482,9 @@ function renderNode(id) {
   const r = (detail = { id, tab: "metrics", hours: 6, data: null, timer: null, charts: [], built: !!state.nodes })
   const node = state.nodes?.find((n) => String(n.id) === String(id))
 
-  r.title = h("h1", { class: swapping ? "display" : "display reveal" })
-  r.lede = h("p", { class: "lede reveal reveal-2" })
-  r.chip = h("div", { class: "chip reveal reveal-3" })
+  r.title = h("h1", { class: entry("display reveal") })
+  r.lede = h("p", { class: entry("lede reveal reveal-2") })
+  r.chip = h("div", { class: entry("chip reveal reveal-3") })
   r.stats = {}
   r.statSub = {}
   const stat = (key, label) => h("div", { class: "stat" },
