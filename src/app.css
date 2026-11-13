@@ -724,7 +724,8 @@ section[id], header[id] { scroll-margin-top: 80px; }
 .term-in .ps { color: var(--mute); }
 .term-input { flex: 1; min-width: 0; padding: 0; border: 0; outline: 0; background: none; color: var(--ink); font: inherit; caret-color: var(--accent); }
 .term-input::placeholder { color: var(--mute); opacity: .7; }
-.term-out { color: var(--mute); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.term-out { color: var(--mute); white-space: pre; overflow-x: auto; scrollbar-width: none; }
+.term-out::-webkit-scrollbar { display: none; }
 .term-in + .term-out + .comment, .term-in + .comment { margin-top: 6px; }
 /* iOS zooms the page when a field under 16px takes focus */
 @media (pointer: coarse) { .term-input { font-size: 16px; } }
@@ -758,3 +759,17 @@ section[id], header[id] { scroll-margin-top: 80px; }
 
 /* coming back to the list: every row laid out for real while the scroll position is restored */
 .settle > .row, .settle > .card { content-visibility: visible; }
+
+/* ── map markers are buttons: pick a country, the list shows only its nodes ── */
+.map .mark { cursor: pointer; outline: none; }
+.map .hit { fill: transparent; }
+.map .mark.dim { opacity: .35; }
+.map .mark.sel .glow { opacity: .28; }
+.map .mark:focus-visible .glow { opacity: .4; }
+
+/* ── diff: two nodes' latency under the terminal ── */
+.diff { margin-top: 16px; }
+.diff-note { margin-top: 10px; font-size: 12px; color: var(--mute); }
+.diff .panel-head { flex-wrap: nowrap; }
+.diff-close { flex: none; width: 32px; height: 32px; border-radius: 9999px; font-size: 20px; line-height: 1; color: var(--body); }
+.diff-close:hover { background: var(--surface-soft); color: var(--ink); }

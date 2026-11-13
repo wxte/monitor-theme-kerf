@@ -424,6 +424,8 @@ const state = {
   sort: null,
   query: "",
   termLimit: null,
+  // a country picked on the map
+  country: null,
 }
 
 function parseRoute() {
@@ -540,10 +542,12 @@ const SORTS = {
   traffic: (n) => monthUsed(n),
   expiry: (n) => { const d = expiryDays(n); return d == null ? null : -d },
 }
+const matches = (n, q) => [n.name, cc(n), n.group, n.os, n.public_remark].some((v) => v && String(v).toLowerCase().includes(q))
 function arrange(nodes) {
   let list = nodes
   const q = state.query
-  if (q) list = list.filter((n) => [n.name, cc(n), n.group, n.os, n.public_remark].some((v) => v && String(v).toLowerCase().includes(q)))
+  if (state.country) list = list.filter((n) => cc(n) === state.country)
+  if (q) list = list.filter((n) => matches(n, q))
   if (state.sort === "name") return [...list].sort((a, b) => String(a.name).localeCompare(String(b.name), "zh-Hans-CN", { numeric: true }))
   const key = SORTS[state.sort]
   if (!key) return list
@@ -570,6 +574,23 @@ const ICONS = {
   sun: () => s("svg", { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": 1.6, "stroke-linecap": "round", class: "theme-sun", "aria-hidden": true },
     s("circle", { cx: 12, cy: 12, r: 4 }),
     s("path", { d: "M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4" })),
+}
+
+// The tab says when something is down: a count before the title, a red dot on the icon.
+const ICON = document.querySelector('link[rel="icon"]')
+const ICON_HREF = ICON?.getAttribute("href")
+const ICON_DOWN = "data:image/svg+xml," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#0a0a0a"/><g fill="none" stroke="#fff" stroke-width="4"><path d="M22 16v32"/><path d="M29 31.5 44 16"/><path d="M33 35.5 46 48"/></g><circle cx="49" cy="15" r="13" fill="#e5484d" stroke="#fff" stroke-width="3"/></svg>')
+let pageTitle = "", downCount = 0
+function setTitle(text) { pageTitle = text; showTitle() }
+function showTitle() {
+  const t = downCount ? `(${downCount} 离线) ${pageTitle}` : pageTitle
+  if (document.title !== t) document.title = t
+}
+function setDown(n) {
+  if (n === downCount) return
+  if (ICON && !n !== !downCount) ICON.setAttribute("href", n ? ICON_DOWN : ICON_HREF)
+  downCount = n
+  showTitle()
 }
 
 function toggleTheme() {
@@ -653,13 +674,29 @@ function renderHome() {
   r.termOut = h("div", { class: "term-out", role: "status", hidden: true })
   r.termIn = h("input", { type: "text", class: "term-input", "aria-label": "终端命令", placeholder: "help",
     autocomplete: "off", autocapitalize: "off", autocorrect: "off", spellcheck: "false", enterkeyhint: "go", maxlength: 60 })
+  r.say = (out) => {
+    r.termOut.hidden = !out
+    // one line is a comment; several are a listing, printed as they are
+    setText(r.termOut, !out ? "" : out.includes("\n") ? out : `# ${out}`)
+  }
+  r.diffBox = h("div", { class: "panel narrow diff", hidden: true })
+  r.charts = []
+  let recall = termHistory.length
+  r.termIn.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { r.termIn.blur(); return }
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return
+    e.preventDefault()
+    recall = Math.max(0, Math.min(termHistory.length, recall + (e.key === "ArrowUp" ? -1 : 1)))
+    r.termIn.value = termHistory[recall] ?? ""
+  })
   const prompt = c.terminal_input
     ? h("form", { class: "term-in", on: { submit: (e) => {
       e.preventDefault()
-      const out = runCommand(r.termIn.value)
+      const line = r.termIn.value.trim()
+      if (line && termHistory[termHistory.length - 1] !== line) termHistory.push(line)
+      recall = termHistory.length
       r.termIn.value = ""
-      r.termOut.hidden = !out
-      setText(r.termOut, out ? `# ${out}` : "")
+      r.say(runCommand(line, r))
       updateHome()
     } } }, h("span", { class: "ps", "aria-hidden": true, text: "$" }), r.termIn)
     : null
@@ -667,7 +704,8 @@ function renderHome() {
     ? h("div", { class: entry("wrap reveal reveal-4", still) },
       h("div", { class: "term narrow", "aria-label": "实时报告" },
         h("div", { class: "term-bar", "aria-hidden": true }, h("i"), h("i"), h("i"), r.termTitle),
-        r.termCmd, r.termHost, r.termRows, prompt, r.termOut, r.termNote))
+        r.termCmd, r.termHost, r.termRows, prompt, r.termOut, r.termNote),
+      r.diffBox)
     : null
   if (c.show_terminal) typeCommand(r)
 
@@ -793,8 +831,8 @@ function updateHome() {
   }
 
   // section copy
-  const found = state.query ? arrange(nodes).length : null
-  setText(r.sectionLede, found != null ? `grep ${state.query} · ${found} / ${sum.total} 个节点`
+  const found = state.query || state.country ? arrange(nodes).length : null
+  setText(r.sectionLede, found != null ? `${[state.country, state.query && `grep ${state.query}`].filter(Boolean).join(" · ")} · ${found} / ${sum.total} 个节点`
     : state.group ? `${state.group.name || "未分组"} · ${sum.total} 个节点`
     : `${sum.total} 个节点${groups.length ? ` · ${groups.length} 个分组` : ""}`)
 
@@ -838,20 +876,117 @@ function updateHome() {
   for (const [id, item] of list) if (!seen.has(id)) { item.destroy?.(); item.el.remove(); list.delete(id) }
   if (state.nodes) r.quiet = false
   r.empty.hidden = !state.nodes || shown.length > 0
-  setText(r.empty, state.query && nodes.length ? `没有匹配「${state.query}」的节点，在终端输入 clear 还原` : "这里还没有节点")
+  setText(r.empty, (state.query || state.country) && nodes.length ? `没有匹配「${[state.country, state.query].filter(Boolean).join(" ")}」的节点，在终端输入 clear 还原` : "这里还没有节点")
 }
 
 /* ── the terminal's input line ── */
 
 const SORT_NAMES = ["cpu", "mem", "disk", "speed", "traffic", "expiry", "name"]
+const termHistory = []
+// "/" puts the cursor in the terminal, as it does in a pager or a search box
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "/" || e.metaKey || e.ctrlKey || e.altKey || !home?.termIn?.isConnected) return
+  if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName) || e.target?.isContentEditable) return
+  e.preventDefault()
+  home.termIn.focus({ preventScroll: true })
+  home.termIn.scrollIntoView({ block: "center", behavior: motionOK() ? "smooth" : "auto" })
+})
+
+const HELP = [
+  ["sort cpu|mem|disk|speed|traffic|expiry|name", "排序"],
+  ["grep 关键字", "筛选节点"],
+  ["top 行数", "报告的行数"],
+  ["ping 关键字", "看这些节点的延迟"],
+  ["diff 节点A 节点B", "对比两台的延迟"],
+  ["neofetch · theme · clear", ""],
+].map(([c, d]) => (d ? `${c}  — ${d}` : c)).join("\n")
+
+// plain ASCII: block characters fall back to a wider font on some phones and
+// push the columns out of line
+const LOGO = ["|   /", "|  / ", "| /  ", "| \\  ", "|  \\ ", "|   \\"]
+function neofetch() {
+  const all = state.nodes ?? []
+  const sum = summarize(all)
+  const info = [
+    `${state.me?.authed ? "admin" : "guest"}@${location.host}`,
+    `theme   ${manifest.name} ${manifest.version}`,
+    `nodes   ${sum.total} (${sum.online} online)`,
+    `regions ${new Set(all.map(cc).filter(Boolean)).size}`,
+    `speed   ↓ ${rate(sum.rx)}  ↑ ${rate(sum.tx)}`,
+    `month   ${bytes(sum.month)}`,
+  ]
+  return info.map((t, i) => `${LOGO[i]}   ${t}`).join("\n")
+}
+
+/** Latency of the nodes matching `q`, from what the list has already fetched. */
+function pingReport(q) {
+  const found = (state.nodes ?? []).filter((n) => matches(n, q))
+  if (!found.length) return `ping: 没有匹配 ${q} 的节点`
+  let waiting = false
+  const lines = found.slice(0, 8).map((n) => {
+    const rows = pingCache.get(n.id)?.rows
+    if (!rows) { if (n.online) { waiting = true; wantPing(n.id) } return `${n.name}  ${n.online ? "…" : "offline"}` }
+    if (!rows.length) return `${n.name}  没有延迟监控`
+    return `${n.name}  ${rows.slice(0, 4).map((x) => `${probeShort(x.name)} ${x.last == null ? "超时" : `${Math.round(x.last)}ms`}`).join("  ")}`
+  })
+  if (found.length > 8) lines.push(`… 还有 ${found.length - 8} 个`)
+  if (waiting) lines.push("# … 的正在获取，再输入一次就有了")
+  return lines.length === 1 ? lines[0] : lines.join("\n")
+}
+
+/** Two nodes' latency on one chart, each as the mean of its lines. */
+function diffNodes(arg, r) {
+  const names = arg.split(/\s+(?:vs\.?\s+)?/i).filter(Boolean)
+  if (names.length !== 2) return "diff: 需要两个节点名，例如 diff tokyo aws"
+  const pick = names.map((q) => (state.nodes ?? []).find((n) => String(n.name).toLowerCase() === q.toLowerCase()) || (state.nodes ?? []).find((n) => matches(n, q.toLowerCase())))
+  if (!pick[0] || !pick[1]) return `diff: 找不到 ${names[pick[0] ? 1 : 0]}`
+  if (pick[0].id === pick[1].id) return "diff: 这是同一个节点"
+  const hours = 6
+  Promise.all(pick.map((n) => api(`/nodes/${encodeURIComponent(n.id)}/metrics?hours=${hours}&points=360&series=ping`)))
+    .then((res) => {
+      if (home !== r) return
+      const series = res.map((d, i) => {
+        // per timestamp, the mean of the lines that answered
+        const at = new Map()
+        for (const p of Array.isArray(d?.ping) ? d.ping : []) {
+          if (!p || !isNum(p.ts) || typeof p.latency !== "number") continue
+          const c = at.get(p.ts) || [0, 0]
+          c[0] += p.latency; c[1]++
+          at.set(p.ts, c)
+        }
+        const pts = [...at].sort((a, b) => a[0] - b[0]).map(([ts, [sum, n]]) => [ts * 1000, sum / n])
+        return { name: pick[i].name, color: i ? "var(--term-red)" : "var(--accent)", pts,
+          gap: medianStep(pts.map((p) => p[0] / 1000)) * 3 * 1000, avg: avg(pts.map((p) => p[1])) }
+      })
+      if (series.some((x) => !x.pts.length)) { r.say(`diff: ${series.find((x) => !x.pts.length).name} 没有延迟数据`); return }
+      const c = chart({ label: "平均延迟", current: "", fmt: (v) => `${Math.round(v)} ms`, tipFmt: (v) => `${Math.round(v)} ms`, series })
+      r.charts = [c]
+      r.diffBox.replaceChildren(
+        h("div", { class: "panel-head" },
+          h("span", { class: "panel-title", text: "延迟对比" }),
+          h("button", { type: "button", class: "diff-close", "aria-label": "关闭对比", text: "×", on: { click: () => closeDiff(r) } })),
+        c.el,
+        h("div", { class: "legend" }, series.map((x) => h("span", null, h("i", { style: { background: x.color } }), x.name, h("em", { text: `${Math.round(x.avg)} ms` })))),
+        h("p", { class: "diff-note", text: `最近 ${hours} 小时，每台取各线路的平均值` }))
+      r.diffBox.hidden = false
+      const d = series[0].avg - series[1].avg
+      r.say(Math.abs(d) < 1 ? "两台差不多" : `${series[d < 0 ? 0 : 1].name} 平均快 ${Math.round(Math.abs(d))} ms`)
+    })
+    .catch((e) => { if (home === r) r.say(`diff: ${e.message}`) })
+  return "正在对比…"
+}
+function closeDiff(r) { r.diffBox.hidden = true; r.diffBox.replaceChildren(); r.charts = [] }
+
 /** Runs one line typed into the terminal; returns what it prints, if anything. */
-function runCommand(line) {
+function runCommand(line, r) {
   const [cmd = "", ...rest] = line.trim().split(/\s+/)
   const arg = rest.join(" ")
   switch (cmd.toLowerCase()) {
     case "": return ""
-    case "help": case "?": case "man":
-      return `sort ${SORT_NAMES.join("|")} · grep 关键字 · top 行数 · theme · clear`
+    case "help": case "?": case "man": return HELP
+    case "neofetch": case "fastfetch": case "uname": return neofetch()
+    case "ping": return arg ? pingReport(arg.toLowerCase()) : "ping: 后面跟节点名、国家或分组，例如 ping jp"
+    case "diff": case "vs": return diffNodes(arg, r)
     case "sort": {
       const k = arg.toLowerCase().replace(/^--?/, "")
       if (!k || k === "default" || k === "none") { state.sort = null; return "已恢复默认顺序" }
@@ -870,7 +1005,8 @@ function runCommand(line) {
     }
     case "theme": toggleTheme(); return ""
     case "clear": case "reset": case "ls":
-      state.sort = null; state.query = ""; state.termLimit = null
+      state.sort = null; state.query = ""; state.termLimit = null; state.country = null
+      closeDiff(r)
       return ""
     case "whoami": return state.me?.authed ? "admin" : "guest"
     case "date": return new Date().toLocaleString()
@@ -882,7 +1018,7 @@ function runCommand(line) {
 
 const termCommand = () => {
   const limit = state.termLimit ?? (Math.round(state.config.terminal_rows) || 5)
-  return `monitor top --sort ${state.sort || "speed"} --limit ${limit}${state.query ? ` | grep ${state.query}` : ""}`
+  return `monitor top --sort ${state.sort || "speed"} --limit ${limit}${state.country ? ` --country ${state.country}` : ""}${state.query ? ` | grep ${state.query}` : ""}`
 }
 
 // The command is typed out once per visit, the first time the terminal shows.
@@ -939,7 +1075,8 @@ function buildMap(still) {
         if (n.online) c.on++
         by.set(code, c)
       }
-      const next = JSON.stringify([...by])
+      if (state.country && !by.has(state.country)) state.country = null
+      const next = JSON.stringify([[...by], state.country])
       if (next === key) return
       const first = key === "" && !still
       key = next
@@ -950,9 +1087,14 @@ function buildMap(still) {
         const [x, y] = MAP_AT.get(code)
         // on the grid, like the land around it
         const cx = Math.min(cols - 0.5, Math.floor(x) + 0.5), cy = Math.min(rows - 0.5, Math.max(0.5, Math.floor(y) + 0.5))
-        const g = s("g", { class: `mark ${c.on ? "on" : "off"}${first ? " pop" : ""}`, style: first ? `animation-delay:${400 + i++ * 70}ms` : null },
-          s("circle", { class: "glow", cx, cy, r: 1.5 }), s("circle", { class: "pin", cx, cy, r: 0.62 }))
-        g.append(s("title", null, `${code} · ${c.on} 在线${c.all > c.on ? ` · ${c.all - c.on} 离线` : ""}`))
+        const picked = state.country === code
+        const pick = () => { state.country = picked ? null : code; updateHome() }
+        const g = s("g", { class: `mark ${c.on ? "on" : "off"}${first ? " pop" : ""}${picked ? " sel" : ""}${state.country && !picked ? " dim" : ""}`,
+          style: first ? `animation-delay:${400 + i++ * 70}ms` : null, role: "button", tabindex: 0, "aria-pressed": String(picked),
+          on: { click: pick, keydown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick() } } } },
+          s("circle", { class: "hit", cx, cy, r: 2.4 }),
+          s("circle", { class: "glow", cx, cy, r: picked ? 2.1 : 1.5 }), s("circle", { class: "pin", cx, cy, r: picked ? 0.8 : 0.62 }))
+        g.append(s("title", null, `${code} · ${c.on} 在线${c.all > c.on ? ` · ${c.all - c.on} 离线` : ""} · 点击${picked ? "取消" : "只看这里"}`))
         marks.append(g)
       }
     },
@@ -1560,7 +1702,7 @@ function updateNode() {
   r.node = n
   const m = n.online ? n.metrics : null
   setText(r.title, n.name)
-  document.title = [n.name, state.me?.site_name || "Monitor"].join(" · ")
+  setTitle([n.name, state.me?.site_name || "Monitor"].join(" · "))
   r.lede.hidden = !n.public_remark
   setText(r.lede, n.public_remark || "")
 
@@ -1971,7 +2113,7 @@ function chart({ label, series, max, fmt, tipFmt, gap, tall, current }) {
 let resizeTimer = null
 window.addEventListener("resize", () => {
   clearTimeout(resizeTimer)
-  resizeTimer = setTimeout(() => detail?.charts.forEach((c) => c.draw()), 120)
+  resizeTimer = setTimeout(() => (detail || home)?.charts?.forEach((c) => c.draw()), 120)
 })
 
 /* ════════════════════════ top level ════════════════════════ */
@@ -1994,7 +2136,7 @@ function route() {
   for (const a of [shell.navHome, shell.navNodes]) a.removeAttribute("aria-current")
   if (rt.name === "node") renderNode(rt.id)
   else {
-    document.title = state.me?.site_name || "Monitor"
+    setTitle(state.me?.site_name || "Monitor")
     shell.navHome.setAttribute("aria-current", "page")
     renderHome()
   }
@@ -2006,6 +2148,7 @@ function onNodes(nodes) {
   state.error = null
   const wasClosed = state.closed
   state.closed = false
+  setDown(nodes.filter((n) => !n.online).length)
   updateShell()
   if (wasClosed) return route()
   if (home) updateHome()
