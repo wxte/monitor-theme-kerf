@@ -78,10 +78,14 @@ export async function build({ quiet = false } = {}) {
   const flagLine = /^const FLAG_DIRS = .*$/m
   if (!importLine.test(js)) throw new Error("src/app.js: manifest import not found")
   if (!flagLine.test(js)) throw new Error("src/app.js: FLAG_DIRS not found")
+  const mapLine = /^import \{ MAP \} from "\.\/map-data\.js"\s*$/m
+  if (!mapLine.test(js)) throw new Error("src/app.js: map-data import not found")
+  const mapData = readFileSync(at("src/map-data.js"), "utf8").replace(/^\/\/.*\n/gm, "").replace(/^export /m, "")
   const osLine = /^const OS_SPRITE = .*$/m
   if (!osLine.test(js)) throw new Error("src/app.js: OS_SPRITE not found")
   js = js
     .replace(importLine, `const manifest = ${JSON.stringify({ name, short, version, config })}`)
+    .replace(mapLine, () => mapData)
     .replace(flagLine, `const FLAG_DIRS = ${JSON.stringify(flagDirs)}`)
     .replace(osLine, `const OS_SPRITE = ${JSON.stringify(osSprite)}`)
   if (esbuild) js = esbuild.transformSync(js, { loader: "js", format: "esm", minify: true, target: "es2020", legalComments: "none" }).code

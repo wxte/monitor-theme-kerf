@@ -91,14 +91,20 @@ function history(id, hours, points, series) {
     if (n.id === 2 && ts > now - span * 0.62 && ts < now - span * 0.55) continue   // an outage gap
     const m = live({ ...n, online: true, id: n.id === 9 ? 99 : n.id }, ts, Math.max(1800, span / 12)) || live({ ...nodes[0] }, ts, 3600)
     const spike = Math.random() < 0.02 ? 6 : 1
-    if (series !== "ping") out.metrics.push({ ts, minutes: step / 60, cpu: m.cpu, cpu_max: Math.min(100, m.cpu * 1.6),
+    // node 1: a short dip a few days back, and no history older than 20 days
+    if (n.id === 1 && ts < now - 20 * 86400) continue
+    const dip = n.id === 1 && ts > now - 5.4 * 86400 && ts < now - 5.3 * 86400
+    if (series !== "ping") out.metrics.push({ ts, minutes: dip ? Math.round(step / 60 * 0.4) : step / 60, cpu: m.cpu, cpu_max: Math.min(100, m.cpu * 1.6),
       mem_used: m.mem_used, disk_used: m.disk_used + (ts - now + span) * 2000, swap_used: m.swap_used,
       net_rx: m.net_rx, net_tx: m.net_tx, net_rx_max: m.net_rx * 1.8 * spike, net_tx_max: m.net_tx * 1.5, tcp: m.tcp, udp: m.udp, procs: m.procs })
     // node 5 has no latency probes; node 3 has a single one
     const tasks = n.id === 5 ? [] : n.id === 3 ? [[1, 38]] : [[1, 38], [2, 52], [3, 71]]
     if (series !== "metrics") for (const [task, base] of tasks) {
-      const lost = task === 2 && Math.random() < 0.01
-      out.ping.push({ task_id: task, ts, latency: lost ? null : Math.round(base + Math.sin(ts / 3000 + task) * 6 + Math.random() * 4 + (Math.random() < 0.01 ? 40 : 0)),
+      // a burst of timeouts and an evening of slower answers, for the heat strip
+      const frac = (ts - (now - span)) / span
+      const lost = task === 2 && (Math.random() < 0.01 || (frac > 0.7 && frac < 0.74))
+      const slow = frac > 0.3 && frac < 0.45 ? 22 * task : 0
+      out.ping.push({ task_id: task, ts, latency: lost ? null : Math.round(base + slow + Math.sin(ts / 3000 + task) * 6 + Math.random() * 4 + (Math.random() < 0.01 ? 40 : 0)),
         ...(Math.random() < 0.03 ? { loss: 8 } : {}) })
     }
   }

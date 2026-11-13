@@ -2,6 +2,7 @@
 // Plain ES module, no dependencies. Every string that comes from the hub or from
 // a node goes into the page through textContent, never as markup.
 import { manifest } from "./manifest.js"
+import { MAP } from "./map-data.js"
 
 /* ════════════════════════ DOM helpers ════════════════════════ */
 
@@ -42,6 +43,7 @@ const setText = (el, t) => { if (el && el.textContent !== t) el.textContent = t 
 
 /* ── motion ── */
 const calm = matchMedia("(prefers-reduced-motion: reduce)")
+const motionOK = () => !calm.matches
 const NUM = /^([^\d-]*)(-?\d+(?:\.\d+)?)(.*)$/s
 // overshoots a little, then settles: the springy part of every animation here
 const easeOutBack = (t) => { const c = 1.6; return 1 + (c + 1) * (t - 1) ** 3 + c * (t - 1) ** 2 }
@@ -418,6 +420,10 @@ const state = {
   // null = every node; otherwise { name } where "" is the ungrouped
   group: null,
   updatedAt: null,
+  // set from the terminal's input line: sort key, search text, rows in the report
+  sort: null,
+  query: "",
+  termLimit: null,
 }
 
 function parseRoute() {
@@ -448,9 +454,34 @@ function go(path) {
     document.getElementById(url.hash.slice(1))?.scrollIntoView({ behavior: "smooth" })
     return
   }
-  history.pushState(null, "", path)
-  route()
-  if (!path.includes("#")) window.scrollTo({ top: 0, behavior: "instant" })
+  // into a node page, the name that was pressed grows into the page's title
+  const from = url.pathname.startsWith("/node/") ? pressedNode?.__nameEl : null
+  swap(() => {
+    history.pushState(null, "", path)
+    route()
+    if (!path.includes("#")) window.scrollTo({ top: 0, behavior: "instant" })
+  }, from)
+}
+
+/**
+ * Changes page inside a view transition where the browser has them and the
+ * visitor has not asked for less motion; elsewhere it just changes page.
+ * `from` carries the shared name out of the old page, `into()` returns the
+ * element that takes it in the new one.
+ */
+let swapping = false     // a title that is flown in does not also fade in
+function swap(change, from, into) {
+  if (!document.startViewTransition || !motionOK()) { change(); return }
+  if (from) from.style.viewTransitionName = "node-title"
+  let to = null
+  const t = document.startViewTransition(() => {
+    if (from) from.style.viewTransitionName = ""
+    swapping = !!from
+    try { change() } finally { swapping = false }
+    to = into?.() || null
+    if (to) to.style.viewTransitionName = "node-title"
+  })
+  t.finished.catch(() => {}).then(() => { if (to) to.style.viewTransitionName = "" })
 }
 document.addEventListener("click", (e) => {
   const a = e.target.closest?.("a[data-route]")
@@ -465,8 +496,14 @@ function restoreHome() {
 }
 window.addEventListener("popstate", () => {
   const backHome = parseRoute().name === "home" && homeScroll != null && !home
-  route()
-  if (backHome && !location.hash) { restoreHome(); requestAnimationFrame(restoreHome) }
+  swap(() => {
+    route()
+    if (backHome && !location.hash) { restoreHome(); requestAnimationFrame(restoreHome) }
+  }, null, () => {
+    // back on the list, the title shrinks into the name it came from
+    const item = backHome && homeAnchor && (home?.cards.get(homeAnchor.id) || home?.rows.get(homeAnchor.id))
+    return item?.el.__nameEl
+  })
 })
 
 /* ════════════════════════ group helpers ════════════════════════ */
@@ -477,6 +514,28 @@ function inGroup(nodes) {
   if (!g) return nodes
   return nodes.filter((n) => (n.group ?? "") === g.name)
 }
+const live = (n) => (n.online ? n.metrics : null)
+// larger first, except name and expiry; a node with no figure goes last
+const SORTS = {
+  cpu: (n) => live(n)?.cpu,
+  mem: (n) => (live(n) ? ratio(live(n).mem_used, live(n).mem_total) : null),
+  disk: (n) => (live(n) ? ratio(live(n).disk_used, live(n).disk_total) : null),
+  speed: (n) => (live(n) ? live(n).net_rx + live(n).net_tx : null),
+  traffic: (n) => monthUsed(n),
+  expiry: (n) => { const d = expiryDays(n); return d == null ? null : -d },
+}
+function arrange(nodes) {
+  let list = nodes
+  const q = state.query
+  if (q) list = list.filter((n) => [n.name, cc(n), n.group, n.os, n.public_remark].some((v) => v && String(v).toLowerCase().includes(q)))
+  if (state.sort === "name") return [...list].sort((a, b) => String(a.name).localeCompare(String(b.name), "zh-Hans-CN", { numeric: true }))
+  const key = SORTS[state.sort]
+  if (!key) return list
+  const val = (n) => { const v = key(n); return typeof v === "number" && Number.isFinite(v) ? v : -Infinity }
+  // stable, so equal nodes keep the operator's order
+  return [...list].sort((a, b) => val(b) - val(a))
+}
+
 function summarize(nodes) {
   let online = 0, rx = 0, tx = 0, month = 0
   for (const n of nodes) {
@@ -563,18 +622,35 @@ function renderHome() {
     ? h("div", { class: "notice reveal" }, h("span", { class: "tag", text: "公告" }), h("span", { class: "txt", text: c.notice }))
     : null
 
+  r.map = c.show_map ? buildMap() : null
+
   // terminal report
   r.termTitle = h("span")
-  r.termCmd = h("div", { class: "cmd line" })
+  r.termCmdText = h("span")
+  r.termCmd = h("div", { class: "cmd line" }, r.termCmdText)
   r.termHost = h("div", { class: "line" })
   r.termRows = h("div", { class: "term-rows" })
   r.termNote = h("div", { class: "comment" })
+  r.termOut = h("div", { class: "term-out", role: "status", hidden: true })
+  r.termIn = h("input", { type: "text", class: "term-input", "aria-label": "终端命令", placeholder: "help",
+    autocomplete: "off", autocapitalize: "off", autocorrect: "off", spellcheck: "false", enterkeyhint: "go", maxlength: 60 })
+  const prompt = c.terminal_input
+    ? h("form", { class: "term-in", on: { submit: (e) => {
+      e.preventDefault()
+      const out = runCommand(r.termIn.value)
+      r.termIn.value = ""
+      r.termOut.hidden = !out
+      setText(r.termOut, out ? `# ${out}` : "")
+      updateHome()
+    } } }, h("span", { class: "ps", "aria-hidden": true, text: "$" }), r.termIn)
+    : null
   const term = c.show_terminal
     ? h("div", { class: "wrap reveal reveal-4" },
       h("div", { class: "term narrow", "aria-label": "实时报告" },
         h("div", { class: "term-bar", "aria-hidden": true }, h("i"), h("i"), h("i"), r.termTitle),
-        r.termCmd, r.termHost, r.termRows, r.termNote))
+        r.termCmd, r.termHost, r.termRows, prompt, r.termOut, r.termNote))
     : null
+  if (c.show_terminal) typeCommand(r)
 
   r.stats = {}
   const stat = (key, label) => h("div", { class: "stat" },
@@ -591,6 +667,7 @@ function renderHome() {
         r.title,
         c.hero_subtitle ? h("p", { class: "lede reveal reveal-2", text: c.hero_subtitle }) : null,
         r.chip)),
+    r.map ? h("div", { class: "wrap reveal reveal-3" }, r.map.el) : null,
     term,
     h("section", { class: "section", id: "nodes" },
       h("div", { class: "wrap" },
@@ -697,8 +774,9 @@ function updateHome() {
   }
 
   // section copy
-  setText(r.sectionLede, state.group
-    ? `${state.group.name || "未分组"} · ${sum.total} 个节点`
+  const found = state.query ? arrange(nodes).length : null
+  setText(r.sectionLede, found != null ? `grep ${state.query} · ${found} / ${sum.total} 个节点`
+    : state.group ? `${state.group.name || "未分组"} · ${sum.total} 个节点`
     : `${sum.total} 个节点${groups.length ? ` · ${groups.length} 个分组` : ""}`)
 
   // stats strip
@@ -707,8 +785,11 @@ function updateHome() {
   setText(r.stats.tx, rate(sum.tx))
   setText(r.stats.month, bytes(sum.month))
 
+  r.map?.update(nodes)
+  const shown = arrange(nodes)
+
   // terminal report
-  if (c.show_terminal) updateTerminal(r, nodes, sum, site)
+  if (c.show_terminal) updateTerminal(r, shown, sum, site)
 
   // node list (keyed, updated in place)
   const list = c.layout === "list" ? r.rows : r.cards
@@ -717,7 +798,7 @@ function updateHome() {
   const regroup = r.regroup
   r.regroup = false
   let fresh = 0
-  nodes.forEach((n, i) => {
+  shown.forEach((n, i) => {
     seen.add(n.id)
     let item = list.get(n.id)
     if (!item) {
@@ -736,16 +817,136 @@ function updateHome() {
     place(r.list, item.el, i)       // the operator's order, without moving what is in place
   })
   for (const [id, item] of list) if (!seen.has(id)) { item.destroy?.(); item.el.remove(); list.delete(id) }
-  r.empty.hidden = !state.nodes || nodes.length > 0
+  r.empty.hidden = !state.nodes || shown.length > 0
+  setText(r.empty, state.query && nodes.length ? `没有匹配「${state.query}」的节点，在终端输入 clear 还原` : "这里还没有节点")
+}
+
+/* ── the terminal's input line ── */
+
+const SORT_NAMES = ["cpu", "mem", "disk", "speed", "traffic", "expiry", "name"]
+/** Runs one line typed into the terminal; returns what it prints, if anything. */
+function runCommand(line) {
+  const [cmd = "", ...rest] = line.trim().split(/\s+/)
+  const arg = rest.join(" ")
+  switch (cmd.toLowerCase()) {
+    case "": return ""
+    case "help": case "?": case "man":
+      return `sort ${SORT_NAMES.join("|")} · grep 关键字 · top 行数 · theme · clear`
+    case "sort": {
+      const k = arg.toLowerCase().replace(/^--?/, "")
+      if (!k || k === "default" || k === "none") { state.sort = null; return "已恢复默认顺序" }
+      if (!SORT_NAMES.includes(k)) return `sort: 不认识 ${arg}，可用 ${SORT_NAMES.join(" ")}`
+      state.sort = k
+      return `节点已按 ${k} 排序`
+    }
+    case "grep": case "find": case "search":
+      state.query = arg.toLowerCase().replace(/^["']|["']$/g, "")
+      return state.query ? `只显示包含 ${state.query} 的节点` : "已取消筛选"
+    case "top": case "head": {
+      const n = Number(arg.replace(/^-n?\s*/, ""))
+      if (!Number.isInteger(n) || n < 1 || n > 20) return "top: 行数在 1 到 20 之间"
+      state.termLimit = n
+      return ""
+    }
+    case "theme": toggleTheme(); return ""
+    case "clear": case "reset": case "ls":
+      state.sort = null; state.query = ""; state.termLimit = null
+      return ""
+    case "whoami": return state.me?.authed ? "admin" : "guest"
+    case "date": return new Date().toLocaleString()
+    case "sudo": return "guest is not in the sudoers file. This incident will be reported."
+    case "exit": case "quit": return "这里没有出口，试试 help"
+    default: return `command not found: ${cmd}，试试 help`
+  }
+}
+
+const termCommand = () => {
+  const limit = state.termLimit ?? (Math.round(state.config.terminal_rows) || 5)
+  return `monitor top --sort ${state.sort || "speed"} --limit ${limit}${state.query ? ` | grep ${state.query}` : ""}`
+}
+
+// The command is typed out once per visit, the first time the terminal shows.
+let typedOnce = false
+function typeCommand(r) {
+  if (typedOnce || !motionOK()) { typedOnce = true; return }
+  typedOnce = true
+  const text = termCommand()
+  const caret = h("i", { class: "caret", "aria-hidden": true })
+  r.typing = true
+  r.termCmdText.textContent = ""
+  r.termCmd.append(caret)
+  r.termCmd.setAttribute("aria-label", text)
+  let i = 0
+  const step = () => {
+    if (home !== r) return
+    r.termCmdText.textContent = text.slice(0, ++i)
+    if (i < text.length) setTimeout(step, 22 + Math.random() * 38)
+    else setTimeout(() => { r.typing = false; caret.remove(); r.termCmd.removeAttribute("aria-label") }, 900)
+  }
+  setTimeout(step, 520)
+}
+
+/* ── dot-matrix world map: land as one dotted path, a marker per country ── */
+
+const MAP_AT = (() => {
+  const at = new Map()
+  for (const item of MAP.places.split(";")) {
+    const [x, y] = item.slice(2).split(",").map(Number)
+    at.set(item.slice(0, 2), [x, y])
+  }
+  return at
+})()
+function buildMap() {
+  const { cols, rows, land } = MAP
+  // every land cell is a zero-length stroke with round caps: one element, 900 dots
+  let d = ""
+  for (let i = 0; i < cols * rows; i++) {
+    if ((parseInt(land[i >> 2], 16) >> (3 - (i & 3))) & 1) d += `M${(i % cols) + 0.5} ${Math.floor(i / cols) + 0.5}h0`
+  }
+  const marks = s("g")
+  const svgEl = s("svg", { class: "map", viewBox: `0 0 ${cols} ${rows}`, role: "img" },
+    s("path", { class: "land", d }), marks)
+  let key = ""
+  return {
+    el: svgEl,
+    update(nodes) {
+      const by = new Map()
+      for (const n of nodes) {
+        const code = cc(n)
+        if (!MAP_AT.has(code)) continue
+        const c = by.get(code) || { on: 0, all: 0 }
+        c.all++
+        if (n.online) c.on++
+        by.set(code, c)
+      }
+      const next = JSON.stringify([...by])
+      if (next === key) return
+      const first = key === ""
+      key = next
+      clear(marks)
+      svgEl.setAttribute("aria-label", by.size ? `节点分布在 ${by.size} 个国家和地区` : "世界地图")
+      let i = 0
+      for (const [code, c] of by) {
+        const [x, y] = MAP_AT.get(code)
+        // on the grid, like the land around it
+        const cx = Math.min(cols - 0.5, Math.floor(x) + 0.5), cy = Math.min(rows - 0.5, Math.max(0.5, Math.floor(y) + 0.5))
+        const g = s("g", { class: `mark ${c.on ? "on" : "off"}${first ? " pop" : ""}`, style: first ? `animation-delay:${400 + i++ * 70}ms` : null },
+          s("circle", { class: "glow", cx, cy, r: 1.5 }), s("circle", { class: "pin", cx, cy, r: 0.62 }))
+        g.append(s("title", null, `${code} · ${c.on} 在线${c.all > c.on ? ` · ${c.all - c.on} 离线` : ""}`))
+        marks.append(g)
+      }
+    },
+  }
 }
 
 function updateTerminal(r, nodes, sum, site) {
-  const limit = Math.round(state.config.terminal_rows) || 5
+  const limit = state.termLimit ?? (Math.round(state.config.terminal_rows) || 5)
   setText(r.termTitle, `monitor — ${site}`)
-  setText(r.termCmd, `monitor top --sort traffic --limit ${limit}`)
+  if (!r.typing) setText(r.termCmdText, termCommand())
   setText(r.termHost, `HOST: ${location.host}  (${sum.online} online · ${sum.total} nodes)`)
   const load = (n) => (n.online && n.metrics ? n.metrics.net_rx + n.metrics.net_tx : -1)
-  const top = [...nodes].sort((a, b) => load(b) - load(a)).slice(0, limit)
+  // `nodes` arrives searched, and sorted when a sort was asked for
+  const top = (state.sort ? nodes : [...nodes].sort((a, b) => load(b) - load(a))).slice(0, limit)
   if (!r.termCells || r.termCells.length !== top.length) {
     clear(r.termRows)
     r.termCells = top.map((_, i) => {
@@ -969,7 +1170,7 @@ function feats(n) {
 function makeCard(node) {
   const ref = {}
   ref.dot = h("i", { class: "dot" })
-  ref.name = h("span")
+  ref.name = h("span", { class: "node-name" })
   ref.desc = h("p", { class: "card-desc" })
   ref.cc = h("span", { class: "card-cc" })
   ref.num = h("span", { class: "num" })
@@ -1000,6 +1201,7 @@ function makeCard(node) {
   let cur = node
   const wants = () => state.config.show_latency && cur.online
   el.__nodeId = node.id
+  el.__nameEl = ref.name
   el.__wantsPing = wants
   seenObserver?.observe(el)
   if (!seenObserver) onScreen.add(node.id)
@@ -1111,7 +1313,7 @@ function makeRow(node) {
   const ref = {}
   let cur = node
   ref.dot = h("i", { class: "dot" })
-  ref.name = h("span")
+  ref.name = h("span", { class: "node-name" })
   ref.cc = h("span", { class: "cc" })
   // the system's icon, where the row has no column for it: after the flag when
   // the name leaves room, otherwise at the end of the second line
@@ -1132,6 +1334,7 @@ function makeRow(node) {
   ref.osn.__row = el
   osRoom?.observe(ref.osn)
   el.__nodeId = node.id
+  el.__nameEl = ref.name
   el.__wantsPing = wants
   seenObserver?.observe(el)
   if (!seenObserver) onScreen.add(node.id)
@@ -1242,7 +1445,7 @@ const windowLabel = (x) => (x < 24 ? `${x}时` : `${Math.round(x / 24)}天`)
 const windowTitle = (x) => (x < 24 ? `最近 ${x} 小时` : `最近 ${Math.round(x / 24)} 天`)
 
 const PALETTE = [
-  { color: "var(--ink)" },
+  { color: "var(--accent)" },
   { color: "var(--term-red)" },
   { color: "var(--ok)" },
   { color: "var(--warn)" },
@@ -1259,7 +1462,7 @@ function renderNode(id) {
   const r = (detail = { id, tab: "metrics", hours: 6, data: null, timer: null, charts: [], built: !!state.nodes })
   const node = state.nodes?.find((n) => String(n.id) === String(id))
 
-  r.title = h("h1", { class: "display reveal" })
+  r.title = h("h1", { class: swapping ? "display" : "display reveal" })
   r.lede = h("p", { class: "lede reveal reveal-2" })
   r.chip = h("div", { class: "chip reveal reveal-3" })
   r.stats = {}
@@ -1271,6 +1474,7 @@ function renderNode(id) {
   r.rangeSeg = h("div", { class: "seg", role: "group", "aria-label": "时间范围" })
   r.chartBox = h("div")
   r.spec = h("dl", { class: "spec" })
+  r.uptime = h("div", { class: "panel uptime", hidden: true })
 
   shell.main.append(
     h("div", { class: "wrap crumb" }, h("a", { href: "/#nodes", text: "← 全部节点", on: { click: (e) => {
@@ -1284,6 +1488,7 @@ function renderNode(id) {
     h("div", { class: "wrap" },
       h("div", { class: "stats", style: { marginBottom: "16px" } },
         stat("cpu", "CPU"), stat("mem", "内存"), stat("disk", "磁盘"), stat("net", "网速")),
+      r.uptime,
       h("div", { class: "panel" },
         h("div", { class: "panel-head" }, r.tabSeg, r.rangeSeg),
         r.chartBox),
@@ -1323,6 +1528,7 @@ function renderNode(id) {
   }
   updateNode()
   loadHistory()
+  loadUptime()
   r.timer = setInterval(() => { if (!document.hidden) loadHistory(true) }, 60_000)
 }
 
@@ -1470,6 +1676,103 @@ function drawHistory() {
       pts: rows.map((p) => [t(p), num(p.disk_used) == null ? null : diskTotal ? (p.disk_used / diskTotal) * 100 : p.disk_used]) }] })
 }
 
+/* ── availability: a bar a day, from the minutes each hour of history holds ── */
+
+async function loadUptime() {
+  const r = detail
+  const days = Math.max(1, Math.min(30, Math.round(state.me?.history_days ?? 7)))
+  let d
+  try {
+    d = await api(`/nodes/${encodeURIComponent(r.id)}/metrics?hours=${days * 24}&points=${days * 24}&series=metrics`)
+  } catch { return }       // an extra, not worth an error on the page
+  if (detail !== r) return
+  const rows = Array.isArray(d?.metrics) ? d.metrics.filter((p) => p && isNum(p.ts)) : []
+  if (!rows.length) return
+  const step = isNum(d.step) && d.step > 0 ? d.step : medianStep(rows.map((p) => p.ts))
+  const now = Date.now()
+  const start = now - days * 86_400_000
+  const dayStart = (ms) => { const x = new Date(ms); x.setHours(0, 0, 0, 0); return x.getTime() }
+  // minutes reported, per local day; a hub too old to say counts each row as whole
+  const up = new Map()
+  for (const p of rows) {
+    const k = dayStart(p.ts * 1000)
+    up.set(k, (up.get(k) || 0) + (isNum(p.minutes) ? p.minutes : step / 60))
+  }
+  const first = dayStart(rows[0].ts * 1000)
+  const bars = []
+  let sumUp = 0, sumAll = 0
+  for (let k = dayStart(start); k <= now; k = dayStart(k + 26 * 3_600_000)) {
+    const next = dayStart(k + 26 * 3_600_000)       // 26 h: lands in the next day whatever the clocks did
+    // before the node's first report there is nothing to hold against it, and
+    // its first day counts from that report
+    if (k < first) { bars.push({ k, pct: null }); continue }
+    const all = (Math.min(next, now) - Math.max(k, start, k === first ? rows[0].ts * 1000 : 0)) / 60_000
+    if (all < 1) continue
+    const got = Math.min(all, up.get(k) || 0)
+    sumUp += got
+    sumAll += all
+    bars.push({ k, pct: (got / all) * 100 })
+  }
+  if (!sumAll) return
+  const total = (sumUp / sumAll) * 100
+  const show = (v) => (v >= 99.995 ? "100%" : `${v.toFixed(v >= 99 ? 2 : 1)}%`)
+  const date = (k) => { const x = new Date(k); return `${x.getMonth() + 1}月${x.getDate()}日` }
+  clear(r.uptime)
+  r.uptime.append(
+    h("div", { class: "uptime-head" },
+      h("span", { class: "panel-title", text: "在线率" }),
+      h("span", { class: "uptime-val" }, h("b", { text: show(total) }), h("small", { text: `近 ${Math.min(days, bars.filter((b) => b.pct != null).length)} 天` }))),
+    h("div", { class: "uptime-bars", role: "img", "aria-label": `近 ${days} 天在线率 ${show(total)}` },
+      bars.map((b) => h("i", {
+        class: b.pct == null ? "none" : b.pct >= 99.9 ? "ok" : b.pct >= 95 ? "warn" : "bad",
+        title: `${date(b.k)} · ${b.pct == null ? "没有记录" : show(b.pct)}`,
+      }))),
+    h("div", { class: "uptime-ends" }, h("span", { text: date(bars[0].k) }), h("span", { text: "今天" })))
+  r.uptime.hidden = false
+}
+
+/* ── latency heat strip: a row of cells per line, darker for slower ── */
+
+function heatStrip(series) {
+  const all = series.flatMap((x) => x.pts)
+  if (!all.length) return null
+  let t0 = Infinity, t1 = -Infinity
+  for (const [t] of all) { if (t < t0) t0 = t; if (t > t1) t1 = t }
+  const cells = innerWidth < 640 ? 40 : 72
+  const span = Math.max(1, t1 - t0)
+  const rows = series.map((x) => {
+    const sum = new Array(cells).fill(0), n = new Array(cells).fill(0), miss = new Array(cells).fill(0)
+    for (const [t, v] of x.pts) {
+      const i = Math.min(cells - 1, Math.floor(((t - t0) / span) * cells))
+      if (v == null) miss[i]++; else { sum[i] += v; n[i]++ }
+    }
+    return { x, avg: sum.map((v, i) => (n[i] ? v / n[i] : null)), n, miss }
+  })
+  // the scale runs from the fastest cell to the 95th percentile, so one spike
+  // does not wash every other cell out to white
+  const vals = rows.flatMap((r) => r.avg.filter((v) => v != null)).sort((a, b) => a - b)
+  if (!vals.length) return null
+  const lo = vals[0], hi = Math.max(lo + 5, vals[Math.floor((vals.length - 1) * 0.95)])
+  const label = (i) => timeLabel(t0 + ((i + 0.5) / cells) * span, span)
+  return h("div", { class: "heat" },
+    rows.map(({ x, avg, n, miss }) => {
+      const strip = s("svg", { viewBox: `0 0 ${cells} 1`, preserveAspectRatio: "none", "aria-hidden": true })
+      for (let i = 0; i < cells; i++) {
+        const lost = miss[i], got = n[i]
+        if (!lost && !got) continue
+        const bad = lost > 0 && lost >= got
+        const rect = s("rect", { x: i + 0.07, y: 0, width: 0.86, height: 1, rx: 0.12,
+          class: bad ? "lost" : null,
+          "fill-opacity": bad ? Math.min(1, 0.45 + (lost / (lost + got)) * 0.55) : (0.1 + 0.9 * Math.min(1, Math.max(0, (avg[i] - lo) / (hi - lo)))).toFixed(2) })
+        rect.append(s("title", null, `${label(i)} · ${got ? `${Math.round(avg[i])} ms` : ""}${lost ? `${got ? " · " : ""}超时 ${lost} 次` : ""}`))
+        strip.append(rect)
+      }
+      return [h("span", { class: "heat-name", text: x.name, title: x.name }), strip]
+    }),
+    h("span"), h("div", { class: "heat-key" }, h("span", { text: timeLabel(t0, span) }),
+      h("span", { text: `浅 ${Math.round(lo)} ms → 深 ${Math.round(hi)} ms · 红 超时` }), h("span", { text: timeLabel(t1, span) })))
+}
+
 // probe ids whose line the visitor has switched off on the latency chart
 const hiddenProbes = new Set()
 
@@ -1511,6 +1814,8 @@ function drawPing(d) {
           x.name,
           h("em", { text: `${x.avg == null ? "—" : Math.round(x.avg) + " ms"}${x.loss > 0 ? ` · 丢 ${x.loss < 1 ? "<1" : Math.round(x.loss)}%` : ""}` }))
       })))
+    const heat = heatStrip(visible)
+    if (heat) box.append(heat)
   }
   render()
 }
@@ -1714,6 +2019,7 @@ async function main() {
   const [me, config] = await Promise.all([api("/me").catch((e) => { state.error = e.message; return null }), loadConfig()])
   state.me = me
   state.config = config
+  if (config.accent && config.accent !== "mono") document.documentElement.dataset.accent = config.accent
   if (me && !me.public_page && !me.authed) { location.href = "/admin/"; return }
   updateShell()
   route()
