@@ -490,15 +490,26 @@ document.addEventListener("click", (e) => {
   go(a.getAttribute("href"))
 })
 function restoreHome() {
+  // Rows off screen are sized by estimate until they are first drawn, which
+  // moved the anchor a frame or two after landing on it -- a visible jolt where
+  // the browser has no scroll anchoring (Safari). While `settle` is on, every
+  // row is laid out for real, so one measurement is final.
+  const list = home?.list
+  const settle = list && list.children.length <= 400
+  if (settle) list.classList.add("settle")
   window.scrollTo({ top: homeScroll, behavior: "instant" })
   const item = homeAnchor && (home?.cards.get(homeAnchor.id) || home?.rows.get(homeAnchor.id))
   if (item) window.scrollBy({ top: item.el.getBoundingClientRect().top - homeAnchor.top, behavior: "instant" })
+  // sizes are remembered once drawn; then the rows can go back to being skipped
+  if (settle) setTimeout(() => list.classList.remove("settle"), 600)
 }
 window.addEventListener("popstate", () => {
   const backHome = parseRoute().name === "home" && homeScroll != null && !home
+  // the list is being put back as it was: its rows do not make an entrance again
+  quietHome = backHome && !location.hash
   swap(() => {
     route()
-    if (backHome && !location.hash) { restoreHome(); requestAnimationFrame(restoreHome) }
+    if (backHome && !location.hash) restoreHome()
   }, null, () => {
     // back on the list, the title shrinks into the name it came from
     const item = backHome && homeAnchor && (home?.cards.get(homeAnchor.id) || home?.rows.get(homeAnchor.id))
@@ -610,11 +621,13 @@ function updateShell() {
 /* ════════════════════════ home ════════════════════════ */
 
 let home = null      // refs while the home page is mounted
+let quietHome = false
 
 function renderHome() {
   clear(shell.main)
   const c = state.config
-  const r = (home = { cards: new Map(), rows: new Map(), groupsKey: null })
+  const r = (home = { cards: new Map(), rows: new Map(), groupsKey: null, quiet: quietHome })
+  quietHome = false
 
   r.title = h("h1", { class: "display xl reveal" })
   r.chip = h("div", { class: "chip reveal reveal-3" })
@@ -660,7 +673,7 @@ function renderHome() {
   r.empty = h("div", { class: "empty", hidden: true, text: "这里还没有节点" })
   r.sectionLede = h("p", { class: "lede" })
 
-  shell.main.append(
+  append(shell.main, [
     h("section", { class: "hero", id: "overview" },
       h("div", { class: "wrap stack" },
         r.notice,
@@ -675,7 +688,7 @@ function renderHome() {
         r.tabs,
         h("div", { class: "stats home", style: { marginBottom: "28px" } },
           stat("online", "在线节点"), stat("rx", "实时下行"), stat("tx", "实时上行"), stat("month", "本期流量")),
-        r.list, r.empty)))
+        r.list, r.empty))])
 
   updateHome()
   if (location.hash) document.getElementById(location.hash.slice(1))?.scrollIntoView()
@@ -804,7 +817,7 @@ function updateHome() {
     if (!item) {
       item = make(n)
       list.set(n.id, item)
-      enter(item.el, fresh++)
+      if (!r.quiet) enter(item.el, fresh++)
       item.update(n)
       // an item scrolled into view catches up with the newest data
       item.el.__show = () => { if (item.pending) { const p = item.pending; item.pending = null; item.update(p) } }
@@ -817,6 +830,7 @@ function updateHome() {
     place(r.list, item.el, i)       // the operator's order, without moving what is in place
   })
   for (const [id, item] of list) if (!seen.has(id)) { item.destroy?.(); item.el.remove(); list.delete(id) }
+  if (state.nodes) r.quiet = false
   r.empty.hidden = !state.nodes || shown.length > 0
   setText(r.empty, state.query && nodes.length ? `没有匹配「${state.query}」的节点，在终端输入 clear 还原` : "这里还没有节点")
 }
@@ -1721,56 +1735,43 @@ async function loadUptime() {
   r.uptime.append(
     h("div", { class: "uptime-head" },
       h("span", { class: "panel-title", text: "在线率" }),
-      h("span", { class: "uptime-val" }, h("b", { text: show(total) }), h("small", { text: `近 ${Math.min(days, bars.filter((b) => b.pct != null).length)} 天` }))),
-    h("div", { class: "uptime-bars", role: "img", "aria-label": `近 ${days} 天在线率 ${show(total)}` },
+      h("span", { class: "uptime-val" }, h("b", { class: total >= 99 ? "ok" : total >= 90 ? "warn" : "bad", text: show(total) }), h("small", { text: `近 ${Math.min(days, bars.filter((b) => b.pct != null).length)} 天` }))),
+    h("div", { class: "beats", role: "img", "aria-label": `近 ${days} 天在线率 ${show(total)}` },
       bars.map((b) => h("i", {
-        class: b.pct == null ? "none" : b.pct >= 99.9 ? "ok" : b.pct >= 95 ? "warn" : "bad",
+        // a few lost minutes a day are the hub restarting, not the node: amber
+        // starts at a quarter of an hour, red at an outage of hours
+        class: b.pct == null ? "none" : b.pct >= 99 ? "ok" : b.pct >= 90 ? "warn" : "bad",
         title: `${date(b.k)} · ${b.pct == null ? "没有记录" : show(b.pct)}`,
       }))),
     h("div", { class: "uptime-ends" }, h("span", { text: date(bars[0].k) }), h("span", { text: "今天" })))
   r.uptime.hidden = false
 }
 
-/* ── latency heat strip: a row of cells per line, darker for slower ── */
+/* ── latency heartbeat: a row of pills per line -- answered, partly lost, lost ── */
 
-function heatStrip(series) {
+function beatStrip(series) {
   const all = series.flatMap((x) => x.pts)
   if (!all.length) return null
   let t0 = Infinity, t1 = -Infinity
   for (const [t] of all) { if (t < t0) t0 = t; if (t > t1) t1 = t }
-  const cells = innerWidth < 640 ? 40 : 72
+  const cells = innerWidth < 640 ? 30 : 60
   const span = Math.max(1, t1 - t0)
-  const rows = series.map((x) => {
-    const sum = new Array(cells).fill(0), n = new Array(cells).fill(0), miss = new Array(cells).fill(0)
-    for (const [t, v] of x.pts) {
-      const i = Math.min(cells - 1, Math.floor(((t - t0) / span) * cells))
-      if (v == null) miss[i]++; else { sum[i] += v; n[i]++ }
-    }
-    return { x, avg: sum.map((v, i) => (n[i] ? v / n[i] : null)), n, miss }
-  })
-  // the scale runs from the fastest cell to the 95th percentile, so one spike
-  // does not wash every other cell out to white
-  const vals = rows.flatMap((r) => r.avg.filter((v) => v != null)).sort((a, b) => a - b)
-  if (!vals.length) return null
-  const lo = vals[0], hi = Math.max(lo + 5, vals[Math.floor((vals.length - 1) * 0.95)])
   const label = (i) => timeLabel(t0 + ((i + 0.5) / cells) * span, span)
-  return h("div", { class: "heat" },
-    rows.map(({ x, avg, n, miss }) => {
-      const strip = s("svg", { viewBox: `0 0 ${cells} 1`, preserveAspectRatio: "none", "aria-hidden": true })
-      for (let i = 0; i < cells; i++) {
-        const lost = miss[i], got = n[i]
-        if (!lost && !got) continue
-        const bad = lost > 0 && lost >= got
-        const rect = s("rect", { x: i + 0.07, y: 0, width: 0.86, height: 1, rx: 0.12,
-          class: bad ? "lost" : null,
-          "fill-opacity": bad ? Math.min(1, 0.45 + (lost / (lost + got)) * 0.55) : (0.1 + 0.9 * Math.min(1, Math.max(0, (avg[i] - lo) / (hi - lo)))).toFixed(2) })
-        rect.append(s("title", null, `${label(i)} · ${got ? `${Math.round(avg[i])} ms` : ""}${lost ? `${got ? " · " : ""}超时 ${lost} 次` : ""}`))
-        strip.append(rect)
+  return h("div", { class: "beat-rows" },
+    series.map((x) => {
+      const sum = new Array(cells).fill(0), got = new Array(cells).fill(0), lost = new Array(cells).fill(0)
+      for (const [t, v] of x.pts) {
+        const i = Math.min(cells - 1, Math.floor(((t - t0) / span) * cells))
+        if (v == null) lost[i]++; else { sum[i] += v; got[i]++ }
       }
-      return [h("span", { class: "heat-name", text: x.name, title: x.name }), strip]
+      return [h("span", { class: "beat-name", text: x.name, title: x.name }),
+        h("div", { class: "beats", "aria-hidden": true }, got.map((n, i) => h("i", {
+          class: !n && !lost[i] ? "none" : !lost[i] ? "ok" : lost[i] >= n ? "bad" : "warn",
+          title: `${label(i)} · ${n ? `${Math.round(sum[i] / n)} ms` : ""}${lost[i] ? `${n ? " · " : ""}超时 ${lost[i]} 次` : ""}${!n && !lost[i] ? "没有记录" : ""}`,
+        })))]
     }),
-    h("span"), h("div", { class: "heat-key" }, h("span", { text: timeLabel(t0, span) }),
-      h("span", { text: `浅 ${Math.round(lo)} ms → 深 ${Math.round(hi)} ms · 红 超时` }), h("span", { text: timeLabel(t1, span) })))
+    h("span"), h("div", { class: "beat-key" }, h("span", { text: timeLabel(t0, span) }),
+      h("span", { text: "绿 正常 · 黄 有超时 · 红 不通" }), h("span", { text: timeLabel(t1, span) })))
 }
 
 // probe ids whose line the visitor has switched off on the latency chart
@@ -1814,8 +1815,8 @@ function drawPing(d) {
           x.name,
           h("em", { text: `${x.avg == null ? "—" : Math.round(x.avg) + " ms"}${x.loss > 0 ? ` · 丢 ${x.loss < 1 ? "<1" : Math.round(x.loss)}%` : ""}` }))
       })))
-    const heat = heatStrip(visible)
-    if (heat) box.append(heat)
+    const beats = beatStrip(visible)
+    if (beats) box.append(beats)
   }
   render()
 }
