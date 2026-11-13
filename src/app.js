@@ -1231,13 +1231,15 @@ function makeRow(node) {
 
 let detail = null
 
-const WINDOWS = [1, 6, 24, 168, 720, 2160]
+const WINDOWS = [1, 3, 6, 12, 24, 168, 360, 720, 2160]
 function windows(historyDays) {
   const whole = Math.max(1, Math.round(historyDays)) * 24
   const hours = [...WINDOWS.filter((x) => x * 1.25 <= whole), whole]
   return [...new Set(hours)]
 }
-const windowLabel = (x) => (x < 24 ? `${x} 小时` : `${Math.round(x / 24)} 天`)
+// short, so eight of them fit one row on a phone; the full wording is the button's title
+const windowLabel = (x) => (x < 24 ? `${x}时` : `${Math.round(x / 24)}天`)
+const windowTitle = (x) => (x < 24 ? `最近 ${x} 小时` : `最近 ${Math.round(x / 24)} 天`)
 
 const PALETTE = [
   { color: "var(--ink)" },
@@ -1304,7 +1306,7 @@ function renderNode(id) {
   } catch { /* storage unavailable */ }
   const remember = () => { try { localStorage.setItem("kerf-chart", JSON.stringify({ tab: r.tab, hours: r.hours })) } catch { /* ignore */ } }
   for (const x of hours) {
-    r.rangeSeg.append(h("button", { type: "button", "data-k": String(x), text: windowLabel(x),
+    r.rangeSeg.append(h("button", { type: "button", "data-k": String(x), text: windowLabel(x), title: windowTitle(x), "aria-label": windowTitle(x),
       on: { click: () => { r.hours = x; remember(); syncSeg(); loadHistory() } } }))
   }
   function syncSeg() {

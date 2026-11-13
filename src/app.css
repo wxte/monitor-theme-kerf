@@ -628,7 +628,7 @@ section[id], header[id] { scroll-margin-top: 80px; }
   .panel + .panel { margin-top: 12px; }
   .panel-head { flex-direction: column; align-items: stretch; gap: 10px; margin-bottom: 12px; }
   .panel-head .seg { width: 100%; }
-  .panel-head .seg button { flex: 1 0 auto; height: 32px; }
+  .panel-head .seg button { flex: 1 0 auto; height: 32px; padding: 0 6px; }
   .chart svg { height: 120px; }
   .chart.tall svg { height: 180px; }
   .charts { gap: 20px; }
