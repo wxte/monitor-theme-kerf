@@ -773,3 +773,15 @@ section[id], header[id] { scroll-margin-top: 80px; }
 .diff .panel-head { flex-wrap: nowrap; }
 .diff-close { flex: none; width: 32px; height: 32px; border-radius: 9999px; font-size: 20px; line-height: 1; color: var(--body); }
 .diff-close:hover { background: var(--surface-soft); color: var(--ink); }
+
+/* ── theme change: the new theme opens as a circle; no cross-fade under it ── */
+.theme-swap::view-transition-old(root), .theme-swap::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
+.theme-swap::view-transition-group(node-title) { animation: none; }
+.theme-swap::view-transition-image-pair(node-title) { display: none; }
+
+/* ── offline nodes step back, so the ones that are up read first ── */
+/* the line that says why -- offline for how long, renewal due -- stays at full strength */
+.row.is-off .node-name, .row.is-off > .os,
+.card.is-off .node-name, .card.is-off .card-desc, .card.is-off .card-cc, .card.is-off .price .big,
+.card.is-off > .btn, .card.is-off > a, .card.is-off > .meters, .card.is-off > .feats { opacity: .5; }
+.is-off .flag, .is-off .os-i { filter: grayscale(1); }

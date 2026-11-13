@@ -593,14 +593,28 @@ function setDown(n) {
   showTitle()
 }
 
-function toggleTheme() {
+function toggleTheme(e) {
   const root = document.documentElement
   const dark = root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches
   const next = dark ? "light" : "dark"
-  root.dataset.theme = next
+  const apply = () => {
+    root.dataset.theme = next
+    // the phone's browser bar follows the visitor's choice too
+    for (const m of document.querySelectorAll('meta[name="theme-color"]')) m.setAttribute("content", next === "dark" ? "#0a0a0a" : "#ffffff")
+  }
   try { localStorage.setItem("kerf-theme", next) } catch { /* private mode */ }
-  // the phone's browser bar follows the visitor's choice too
-  for (const m of document.querySelectorAll('meta[name="theme-color"]')) m.setAttribute("content", next === "dark" ? "#0a0a0a" : "#ffffff")
+  if (!document.startViewTransition || !motionOK()) { apply(); return }
+  // The new theme opens as a circle from the button that was pressed (from the
+  // corner it sits in when the command came from the terminal).
+  const at = e?.currentTarget?.getBoundingClientRect?.()
+  const x = at ? at.left + at.width / 2 : innerWidth - 32, y = at ? at.top + at.height / 2 : 32
+  const reach = Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y))
+  root.classList.add("theme-swap")
+  const t = document.startViewTransition(apply)
+  t.ready.then(() => root.animate(
+    { clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${reach}px at ${x}px ${y}px)`] },
+    { duration: 520, easing: "cubic-bezier(.3, .1, .2, 1)", pseudoElement: "::view-transition-new(root)" })).catch(() => {})
+  t.finished.catch(() => {}).then(() => root.classList.remove("theme-swap"))
 }
 
 const shell = {}
@@ -1539,6 +1553,7 @@ function makeRow(node) {
     destroy() { seenObserver?.unobserve(el); osRoom?.unobserve(ref.osn); onScreen.delete(node.id); pingWatch.delete(node.id) },
     update(n) {
       cur = n
+      el.classList.toggle("is-off", !n.online)
       const ok = `${n.os}|${n.arch}|${n.virt}`
       if (ok !== osKey) {
         osKey = ok
