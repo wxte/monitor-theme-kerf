@@ -617,6 +617,23 @@ function toggleTheme(e) {
   t.finished.catch(() => {}).then(() => root.classList.remove("theme-swap"))
 }
 
+// The header gives up some height while the page is read downwards and takes
+// it back as soon as it is scrolled up. Its margin grows by what its height
+// loses, so nothing below it moves.
+let lastY = 0, slim = false, scrollTick = 0
+addEventListener("scroll", () => {
+  if (scrollTick) return
+  scrollTick = requestAnimationFrame(() => {
+    scrollTick = 0
+    const y = scrollY, d = y - lastY
+    const next = y < 48 ? false : d > 4 ? true : d < -4 ? false : slim
+    if (Math.abs(d) > 4) lastY = y
+    if (next === slim) return
+    slim = next
+    document.getElementById("top")?.classList.toggle("slim", slim)
+  })
+}, { passive: true })
+
 const shell = {}
 function buildShell() {
   const app = document.getElementById("app")
@@ -669,6 +686,7 @@ function renderHome() {
   const r = (home = { cards: new Map(), rows: new Map(), groupsKey: null, quiet: quietHome })
   const still = swapping || quietHome
   quietHome = false
+  r.skel = state.nodes ? null : Array.from({ length: 6 }, () => skeleton(c.layout === "list"))
 
   r.title = h("h1", { class: entry("display xl reveal", still) })
   r.chip = h("div", { class: entry("chip reveal reveal-3", still) })
@@ -727,7 +745,7 @@ function renderHome() {
   const stat = (key, label) => h("div", { class: "stat" },
     h("div", { class: "val", ref: (el) => (r.stats[key] = el) }), h("div", { class: "lbl", text: label }))
   r.tabs = h("div", { class: "tabs", hidden: true })
-  r.list = h("div", { class: c.layout === "list" ? "rows" : "grid" })
+  r.list = h("div", { class: c.layout === "list" ? "rows" : "grid" }, r.skel)
   r.empty = h("div", { class: "empty", hidden: true, text: "这里还没有节点" })
   r.sectionLede = h("p", { class: "lede" })
 
@@ -846,15 +864,17 @@ function updateHome() {
 
   // section copy
   const found = state.query || state.country ? arrange(nodes).length : null
-  setText(r.sectionLede, found != null ? `${[state.country, state.query && `grep ${state.query}`].filter(Boolean).join(" · ")} · ${found} / ${sum.total} 个节点`
+  setText(r.sectionLede, !state.nodes ? "正在连接…" : found != null ? `${[state.country, state.query && `grep ${state.query}`].filter(Boolean).join(" · ")} · ${found} / ${sum.total} 个节点`
     : state.group ? `${state.group.name || "未分组"} · ${sum.total} 个节点`
     : `${sum.total} 个节点${groups.length ? ` · ${groups.length} 个分组` : ""}`)
 
   // stats strip
-  setText(r.stats.online, `${sum.online}/${sum.total}`)
-  setText(r.stats.rx, rate(sum.rx))
-  setText(r.stats.tx, rate(sum.tx))
-  setText(r.stats.month, bytes(sum.month))
+  // before the first answer there is nothing to count: a dash, not a zero
+  const ready = !!state.nodes
+  setText(r.stats.online, ready ? `${sum.online}/${sum.total}` : "—")
+  setText(r.stats.rx, ready ? rate(sum.rx) : "—")
+  setText(r.stats.tx, ready ? rate(sum.tx) : "—")
+  setText(r.stats.month, ready ? bytes(sum.month) : "—")
 
   r.map?.update(nodes)
   const shown = arrange(nodes)
@@ -868,6 +888,7 @@ function updateHome() {
   const seen = new Set()
   const regroup = r.regroup
   r.regroup = false
+  if (state.nodes && r.skel) { for (const el of r.skel) el.remove(); r.skel = null }
   let fresh = 0
   shown.forEach((n, i) => {
     seen.add(n.id)
@@ -891,6 +912,15 @@ function updateHome() {
   if (state.nodes) r.quiet = false
   r.empty.hidden = !state.nodes || shown.length > 0
   setText(r.empty, (state.query || state.country) && nodes.length ? `没有匹配「${[state.country, state.query].filter(Boolean).join(" ")}」的节点，在终端输入 clear 还原` : "这里还没有节点")
+}
+
+/** A placeholder with the outline of a row or a card, shown while the nodes load. */
+function skeleton(row) {
+  const bar = (cls) => h("b", { class: `sk ${cls}` })
+  return row
+    ? h("div", { class: "row skel", "aria-hidden": true },
+      h("div", { class: "who" }, bar("w-name"), bar("w-sub")), h("div", { class: "os" }), bar("w-lanes"), bar("w-net"), h("span", { class: "go" }))
+    : h("div", { class: "card skel", "aria-hidden": true }, bar("w-name"), bar("w-price"), bar("w-btn"), bar("w-line"), bar("w-line"), bar("w-line"))
 }
 
 /* ── the terminal's input line ── */
@@ -1119,7 +1149,7 @@ function updateTerminal(r, nodes, sum, site) {
   const limit = state.termLimit ?? (Math.round(state.config.terminal_rows) || 5)
   setText(r.termTitle, `monitor — ${site}`)
   if (!r.typing) setText(r.termCmdText, termCommand())
-  setText(r.termHost, `HOST: ${location.host}  (${sum.online} online · ${sum.total} nodes)`)
+  setText(r.termHost, `HOST: ${location.host}  (${state.nodes ? `${sum.online} online · ${sum.total} nodes` : "connecting…"})`)
   const load = (n) => (n.online && n.metrics ? n.metrics.net_rx + n.metrics.net_tx : -1)
   // `nodes` arrives searched, and sorted when a sort was asked for
   const top = (state.sort ? nodes : [...nodes].sort((a, b) => load(b) - load(a))).slice(0, limit)
@@ -1651,7 +1681,12 @@ function renderNode(id) {
   r.rangeSeg = h("div", { class: "seg", role: "group", "aria-label": "时间范围" })
   r.chartBox = h("div")
   r.spec = h("dl", { class: "spec" })
-  r.uptime = h("div", { class: "panel uptime", hidden: true })
+  // Takes its full height at once, as placeholders, so the charts below do not
+  // jump down when the month of history arrives.
+  r.uptime = h("div", { class: "panel uptime" },
+    h("div", { class: "uptime-head" }, h("span", { class: "panel-title", text: "在线率" }), h("span", { class: "uptime-val" }, h("b", { class: "sk", text: "100%" }))),
+    h("div", { class: "beats", "aria-hidden": true }, Array.from({ length: 30 }, () => h("i", { class: "none sk" }))),
+    h("div", { class: "uptime-ends" }, h("span", { text: "\u00a0" })))
 
   shell.main.append(
     h("div", { class: "wrap crumb" }, h("a", { href: "/#nodes", text: "← 全部节点", on: { click: (e) => {
@@ -1859,12 +1894,17 @@ async function loadUptime() {
   const r = detail
   const days = Math.max(1, Math.min(30, Math.round(state.me?.history_days ?? 7)))
   let d
+  // nothing to show keeps the panel, and its height, with a line saying so
+  const none = () => {
+    r.uptime.querySelector(".uptime-val").replaceChildren(h("small", { text: "暂无记录" }))
+    for (const i of r.uptime.querySelectorAll(".beats i")) i.classList.remove("sk")
+  }
   try {
     d = await api(`/nodes/${encodeURIComponent(r.id)}/metrics?hours=${days * 24}&points=${days * 24}&series=metrics`)
-  } catch { return }       // an extra, not worth an error on the page
+  } catch { if (detail === r) none(); return }
   if (detail !== r) return
   const rows = Array.isArray(d?.metrics) ? d.metrics.filter((p) => p && isNum(p.ts)) : []
-  if (!rows.length) return
+  if (!rows.length) return none()
   const step = isNum(d.step) && d.step > 0 ? d.step : medianStep(rows.map((p) => p.ts))
   const now = Date.now()
   const start = now - days * 86_400_000
@@ -1890,7 +1930,7 @@ async function loadUptime() {
     sumAll += all
     bars.push({ k, pct: (got / all) * 100 })
   }
-  if (!sumAll) return
+  if (!sumAll) return none()
   const total = (sumUp / sumAll) * 100
   const show = (v) => (v >= 99.995 ? "100%" : `${v.toFixed(v >= 99 ? 2 : 1)}%`)
   const date = (k) => { const x = new Date(k); return `${x.getMonth() + 1}月${x.getDate()}日` }
@@ -1907,7 +1947,6 @@ async function loadUptime() {
         title: `${date(b.k)} · ${b.pct == null ? "没有记录" : show(b.pct)}`,
       }))),
     h("div", { class: "uptime-ends" }, h("span", { text: date(bars[0].k) }), h("span", { text: "今天" })))
-  r.uptime.hidden = false
 }
 
 /* ── latency heartbeat: a row of pills per line -- answered, partly lost, lost ── */

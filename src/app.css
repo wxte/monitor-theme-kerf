@@ -785,3 +785,36 @@ section[id], header[id] { scroll-margin-top: 80px; }
 .card.is-off .node-name, .card.is-off .card-desc, .card.is-off .card-cc, .card.is-off .price .big,
 .card.is-off > .btn, .card.is-off > a, .card.is-off > .meters, .card.is-off > .feats { opacity: .5; }
 .is-off .flag, .is-off .os-i { filter: grayscale(1); }
+
+/* ── header: slimmer while scrolling down. Height lost is margin gained. ── */
+.top { --top-h: 64px; --top-slim: 48px; }
+.top .wrap { transition: height .28s cubic-bezier(.3, .7, .2, 1); }
+.top .brand, .top .brand img, .top .right { transition: transform .28s cubic-bezier(.3, .7, .2, 1); transform-origin: left center; }
+.top .right { transform-origin: right center; }
+.top { transition: margin-bottom .28s cubic-bezier(.3, .7, .2, 1); }
+.top.slim { margin-bottom: calc(var(--top-h) - var(--top-slim)); }
+.top.slim .wrap { height: var(--top-slim); }
+.top.slim .brand { transform: scale(.88); }
+.top.slim .right { transform: scale(.88); }
+@media (max-width: 640px) { .top { --top-h: 56px; --top-slim: 44px; } }
+@media (prefers-reduced-motion: reduce) { .top, .top .wrap, .top .brand, .top .right { transition: none; } }
+
+/* ── placeholders while data loads ── */
+.sk { display: block; border-radius: 6px; background: var(--track); color: transparent !important; }
+@media (prefers-reduced-motion: no-preference) {
+  .sk { animation: sk 1s ease-in-out infinite alternate; }
+  @keyframes sk { from { opacity: .45; } to { opacity: 1; } }
+}
+.uptime-val b.sk { background: var(--track); }
+.beats i.sk { border-radius: 9999px; }
+.skel { pointer-events: none; content-visibility: visible; }
+.row.skel .who { display: grid; gap: 9px; }
+.row.skel .w-name { width: 46%; height: 16px; }
+.row.skel .w-sub { width: 70%; height: 11px; }
+.row.skel .w-lanes { height: 44px; }
+.row.skel .w-net { height: 34px; }
+.card.skel { display: grid; gap: 14px; align-content: start; min-height: 300px; }
+.card.skel .w-name { width: 50%; height: 18px; }
+.card.skel .w-price { width: 36%; height: 30px; margin-top: 8px; }
+.card.skel .w-btn { height: 40px; border-radius: 9999px; margin: 6px 0; }
+.card.skel .w-line { height: 10px; }
