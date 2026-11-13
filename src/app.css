@@ -824,3 +824,19 @@ section[id], header[id] { scroll-margin-top: 80px; }
   .chart svg.draw .series, .chart svg.draw .area { animation: wipe 1s cubic-bezier(.3, .7, .2, 1) both; }
   .chart svg.pending .series, .chart svg.pending .area { clip-path: inset(0 100% 0 0); }
 }
+
+/* ── share: button beside the crumb, and the picture in a sheet ── */
+.crumb { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.share-btn { font-size: 14px; color: var(--body); padding: 4px 10px; margin: -4px -10px; border-radius: 9999px; }
+.share-btn:hover { color: var(--ink); background: var(--surface-soft); }
+.share { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 20px; background: color-mix(in srgb, #000 55%, transparent); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+.share-box { display: grid; gap: 14px; max-width: 420px; width: 100%; max-height: 100%; }
+.share-box img { display: block; width: 100%; max-height: calc(100dvh - 130px); object-fit: contain; border-radius: var(--radius); box-shadow: 0 0 0 1px var(--hairline), 0 20px 60px rgb(0 0 0 / .35); background: var(--canvas); }
+.share-acts { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+.share-acts .btn-ghost { background: var(--canvas); }
+@media (prefers-reduced-motion: no-preference) {
+  .share { animation: reveal .2s ease both; }
+}
+/* a node that is not there has no figures to show */
+.node-hero.gone { padding-bottom: 96px; }
+.node-hero.gone ~ * { display: none; }

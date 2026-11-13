@@ -1694,8 +1694,9 @@ function renderNode(id) {
       e.preventDefault()
       // back to where the visitor was on the list, when that is where they came from
       if (cameFromHome) history.back(); else go("/#nodes")
-    } } })),
-    h("section", { class: "node-hero" },
+    } } }),
+      h("button", { type: "button", class: "share-btn", text: "分享", hidden: !node, on: { click: () => shareNode(r) } })),
+    h("section", { class: node || !state.nodes ? "node-hero" : "node-hero gone" },
       h("div", { class: "wrap stack" }, r.title, r.lede, r.chip)),
     h("div", { class: "wrap" },
       h("div", { class: "stats", style: { marginBottom: "16px" } },
@@ -1891,6 +1892,135 @@ function drawHistory() {
       pts: rows.map((p) => [t(p), num(p.disk_used) == null ? null : diskTotal ? (p.disk_used / diskTotal) * 100 : p.disk_used]) }] })
 }
 
+/* ── share: the node's state as a picture ── */
+
+async function shareNode(r) {
+  const n = r.node
+  if (!n || r.sharing) return
+  r.sharing = true
+  try {
+    // latency: what the list already fetched, else the last hour now
+    let lines = pingCache.get(n.id)?.rows
+    if (!lines && n.online) {
+      lines = await api(`/nodes/${encodeURIComponent(n.id)}/metrics?hours=1&points=60&series=ping`).then(summarizePing).catch(() => [])
+    }
+    await Promise.all(['300 44px "Kerf"', '500 14px "Space Grotesk"', '14px "JetBrains Mono"'].map((f) => document.fonts.load(f, n.name).catch(() => {})))
+    if (detail !== r) return
+    const canvas = drawShareCard(r, n, (lines || []).slice(0, 3))
+    const blob = await new Promise((done) => canvas.toBlob(done, "image/png"))
+    if (!blob || detail !== r) return
+    showShare(blob, n)
+  } finally { r.sharing = false }
+}
+
+function drawShareCard(r, n, lines) {
+  const css = getComputedStyle(document.documentElement)
+  const v = (name) => css.getPropertyValue(name).trim()
+  const C = { bg: v("--canvas"), ink: v("--ink"), body: v("--body"), mute: v("--mute"), line: v("--hairline"), track: v("--track"),
+    ok: v("--ok"), warn: v("--warn"), bad: v("--bad"), accent: v("--accent") || v("--ink") }
+  const SANS = '"Space Grotesk", system-ui, "PingFang SC", "Microsoft YaHei", sans-serif'
+  const MONO = '"JetBrains Mono", ui-monospace, "PingFang SC", monospace'
+  const W = 540, P = 36, m = n.online ? n.metrics : null
+  const H = 250 + 96 + (r.up ? 92 : 0) + (lines.length ? 34 + lines.length * 30 : 0) + 52
+  const scale = 2
+  const cv = document.createElement("canvas")
+  cv.width = W * scale; cv.height = H * scale
+  const g = cv.getContext("2d")
+  g.scale(scale, scale)
+  g.fillStyle = C.bg; g.fillRect(0, 0, W, H)
+  g.textBaseline = "alphabetic"
+  const text = (t, x, y, font, color, align = "left") => { g.font = font; g.fillStyle = color; g.textAlign = align; g.fillText(t, x, y) }
+  // a string cut to a width, with an ellipsis
+  const fit = (t, font, max) => { g.font = font; if (g.measureText(t).width <= max) return t; let s = t; while (s.length > 1 && g.measureText(s + "…").width > max) s = s.slice(0, -1); return s + "…" }
+  const rule = (y) => { g.fillStyle = C.line; g.fillRect(P, y, W - P * 2, 1) }
+
+  const site = state.me?.site_name || "Monitor"
+  text(fit(site, `600 15px ${SANS}`, 300), P, 50, `600 15px ${SANS}`, C.ink)
+  text(new Date().toLocaleString("zh-CN", { hour12: false, month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }), W - P, 50, `12px ${MONO}`, C.mute, "right")
+
+  const nameFont = `300 44px "Kerf", ${SANS}`
+  text(fit(String(n.name), nameFont, W - P * 2), P, 128, nameFont, C.ink)
+  const ago = sinceSeen(n)
+  const status = n.online ? (m ? "在线" : "等待上报") : `离线${ago == null ? "" : ` ${uptime(ago)}`}`
+  const sc = n.online ? (m ? C.ok : C.warn) : C.bad
+  g.fillStyle = sc; g.beginPath(); g.arc(P + 4, 160, 4, 0, 7); g.fill()
+  text(status, P + 16, 165, `500 14px ${SANS}`, sc)
+  const sw = g.measureText(status).width
+  const bits = [cc(n), osName(n.os), n.arch, n.virt].filter(Boolean).join(" · ")
+  text(fit(bits, `13px ${MONO}`, W - P * 2 - sw - 34), P + 16 + sw + 14, 165, `13px ${MONO}`, C.mute)
+  if (n.public_remark) text(fit(String(n.public_remark), `14px ${SANS}`, W - P * 2), P, 196, `14px ${SANS}`, C.body)
+
+  // four figures
+  let y = 250
+  rule(y - 26)
+  const used = monthUsed(n)
+  const cells = [
+    ["CPU", m ? pct(m.cpu) : "—"],
+    ["内存", m ? pct(ratio(m.mem_used, m.mem_total), 0) : "—"],
+    ["磁盘", m ? pct(ratio(m.disk_used, m.disk_total), 0) : "—"],
+    ["本期流量", n.traffic_limit > 0 ? pct((used / n.traffic_limit) * 100, 0) : bytes(used)],
+  ]
+  const cw = (W - P * 2) / 4
+  cells.forEach(([k, val], i) => {
+    text(val, P + cw * i, y + 22, `600 22px ${SANS}`, C.ink)
+    text(k, P + cw * i, y + 44, `12px ${SANS}`, C.mute)
+  })
+  y += 96
+
+  if (r.up) {
+    rule(y - 26)
+    text("在线率", P, y + 6, `500 14px ${SANS}`, C.ink)
+    text(`${r.up.text} · 近 ${r.up.days} 天`, W - P, y + 6, `13px ${MONO}`, C[r.up.level], "right")
+    const bw = (W - P * 2 + 3) / r.up.bars.length
+    r.up.bars.forEach((b, i) => { g.fillStyle = b === "none" ? C.track : C[b]; g.beginPath(); g.roundRect(P + bw * i, y + 22, bw - 3, 22, 4); g.fill() })
+    y += 92
+  }
+
+  if (lines.length) {
+    rule(y - 26)
+    text("延迟 · 最近 1 小时", P, y + 6, `500 14px ${SANS}`, C.ink)
+    y += 34
+    lines.forEach((x, i) => {
+      const ly = y + i * 30
+      text(fit(x.name, `13px ${SANS}`, 110), P, ly + 4, `13px ${SANS}`, C.body)
+      const vals = x.vals.filter((q) => q != null)
+      if (vals.length > 1) {
+        const lo = Math.min(...vals), hi = Math.max(lo + 10, ...vals)
+        const x0 = P + 124, x1 = W - P - 130
+        g.strokeStyle = C.accent; g.lineWidth = 1.4; g.lineJoin = "round"; g.beginPath()
+        vals.forEach((q, k) => { const px = x0 + (k / (vals.length - 1)) * (x1 - x0), py = ly + 8 - ((q - lo) / (hi - lo)) * 14; k ? g.lineTo(px, py) : g.moveTo(px, py) })
+        g.stroke()
+      }
+      const loss = x.loss > 0 ? ` · 丢 ${x.loss < 1 ? "<1" : Math.round(x.loss)}%` : ""
+      text(`${x.last == null ? "超时" : `${Math.round(x.last)} ms`}${loss}`, W - P, ly + 4, `13px ${MONO}`, x.last == null ? C.bad : C.ink, "right")
+    })
+    y += lines.length * 30
+  }
+
+  rule(H - 52)
+  text(location.host, P, H - 22, `12px ${MONO}`, C.mute)
+  text(`${manifest.name} theme`, W - P, H - 22, `12px ${MONO}`, C.mute, "right")
+  return cv
+}
+
+function showShare(blob, n) {
+  const url = URL.createObjectURL(blob)
+  const name = `${String(n.name).replace(/[^\w\u4e00-\u9fff.-]+/g, "_")}.png`
+  const file = typeof File === "function" ? new File([blob], name, { type: "image/png" }) : null
+  const canShare = !!file && !!navigator.canShare?.({ files: [file] })
+  const close = () => { sheet.remove(); URL.revokeObjectURL(url); document.removeEventListener("keydown", onKey) }
+  const onKey = (e) => { if (e.key === "Escape") close() }
+  const sheet = h("div", { class: "share", role: "dialog", "aria-modal": "true", "aria-label": "分享图片", on: { click: (e) => { if (e.target === sheet) close() } } },
+    h("div", { class: "share-box" },
+      h("img", { src: url, alt: `${n.name} 的状态图片` }),
+      h("div", { class: "share-acts" },
+        canShare ? h("button", { type: "button", class: "btn btn-primary", text: "分享", on: { click: () => navigator.share({ files: [file], title: n.name }).catch(() => {}) } }) : null,
+        h("a", { class: canShare ? "btn btn-ghost" : "btn btn-primary", href: url, download: name, text: "保存图片" }),
+        h("button", { type: "button", class: "btn btn-ghost", text: "关闭", on: { click: close } }))))
+  document.addEventListener("keydown", onKey)
+  document.body.append(sheet)
+}
+
 /* ── availability: a bar a day, from the minutes each hour of history holds ── */
 
 async function loadUptime() {
@@ -1937,6 +2067,7 @@ async function loadUptime() {
   const total = (sumUp / sumAll) * 100
   const show = (v) => (v >= 99.995 ? "100%" : `${v.toFixed(v >= 99 ? 2 : 1)}%`)
   const date = (k) => { const x = new Date(k); return `${x.getMonth() + 1}月${x.getDate()}日` }
+  r.up = { days: Math.min(days, bars.filter((b) => b.pct != null).length), text: show(total), level: total >= 99 ? "ok" : total >= 90 ? "warn" : "bad", bars: bars.map((b) => (b.pct == null ? "none" : b.pct >= 99 ? "ok" : b.pct >= 90 ? "warn" : "bad")) }
   clear(r.uptime)
   r.uptime.append(
     h("div", { class: "uptime-head" },
