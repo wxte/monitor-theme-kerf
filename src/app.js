@@ -2304,14 +2304,28 @@ function chart({ label, series, max, fmt, tipFmt, gap, tall, current }) {
     }
     tip.hidden = false
     const left = (geom.X(tx) / geom.W) * rect.width
-    tip.style.left = `${Math.min(Math.max(0, left + 12), rect.width - tip.offsetWidth)}px`
+    const room = rect.width - tip.offsetWidth
+    // A finger covers what is right of where it touches, so on a touch screen
+    // the box goes to the far side of the chart from the finger.
+    tip.style.left = `${e.pointerType === "touch" || e.pointerType === "pen"
+      ? (left > rect.width / 2 ? 0 : Math.max(0, room))
+      : Math.min(Math.max(0, left + 12), room)}px`
+    touching = e.pointerType === "touch" || e.pointerType === "pen"
+  }
+  let touching = false
+  const hide = () => {
+    tip.hidden = true
+    if (geom) geom.hover.setAttribute("visibility", "hidden")
   }
   svgEl.addEventListener("pointermove", onPoint)
   svgEl.addEventListener("pointerdown", onPoint)
-  svgEl.addEventListener("pointerleave", () => {
-    tip.hidden = true
-    if (geom) geom.hover.setAttribute("visibility", "hidden")
-  })
+  // With a mouse the box follows the pointer and goes when it leaves. With a
+  // finger it stays after the finger lifts, so it can be read, until the next
+  // tap somewhere else.
+  svgEl.addEventListener("pointerleave", () => { if (!touching) hide() })
+  document.addEventListener("pointerdown", (e) => {
+    if (touching && !tip.hidden && !svgEl.contains(e.target)) { touching = false; hide() }
+  }, { passive: true })
 
   requestAnimationFrame(draw)
   return { el, draw }
